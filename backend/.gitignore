@@ -1,0 +1,21 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Build output
+bin/
+dist/
+
+# Test coverage
+*.out
+coverage.html
+
+# Go workspace (unless you use it intentionally)
+go.work
+go.work.sum
+
+# Air (live reload tool, if you use it)
+tmp/
