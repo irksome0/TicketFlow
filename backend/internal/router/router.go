@@ -43,6 +43,7 @@ func Setup(db *gorm.DB, jwtSecret string) *gin.Engine {
 			// Вкладення
 			tickets.POST("/:id/attachments", attachmentHandler.Upload)
 			tickets.GET("/:id/attachments", attachmentHandler.GetByTicket)
+			tickets.GET("/:id/attachements/:aid/download", attachmentHandler.Download)
 		}
 
 		// Маршрути управління користувачами (лише Admin)
