@@ -7,6 +7,9 @@ import { getTickets } from "@/lib/api";
 import { clearAuth, getStoredUser, getToken } from "@/lib/auth";
 import type { Ticket, TicketPriority, TicketStatus, User } from "@/lib/types";
 
+const statuses: TicketStatus[] = ["New", "In Progress", "Resolved", "Closed", "Reopened"];
+const priorities: TicketPriority[] = ["High", "Medium", "Low"];
+
 function statusClass(status: TicketStatus): string {
   switch (status) {
     case "New":
@@ -47,6 +50,8 @@ export default function TicketsPage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [statusFilter, setStatusFilter] = useState<TicketStatus | "">("");
+  const [priorityFilter, setPriorityFilter] = useState<TicketPriority | "">("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,13 +72,25 @@ export default function TicketsPage() {
     }
 
     setUser(storedUser);
+  }, [router]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
 
     async function loadTickets() {
+      setIsLoading(true);
+      setError(null);
       try {
-        const response = await getTickets();
+        const response = await getTickets({
+          status: statusFilter || undefined,
+          priority: priorityFilter || undefined,
+        });
         setTickets(response.data);
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Помилка отримання заявок";
+        const message =
+          err instanceof Error ? err.message : "Не вдалося отримати список заявок.";
         setError(message);
         if (message.toLowerCase().includes("unauthorized")) {
           router.replace("/login");
@@ -84,7 +101,7 @@ export default function TicketsPage() {
     }
 
     void loadTickets();
-  }, [router]);
+  }, [priorityFilter, router, statusFilter, user]);
 
   function handleLogout() {
     clearAuth();
@@ -108,6 +125,15 @@ export default function TicketsPage() {
               <p className="text-sm font-medium text-text">{userName}</p>
               <p className="text-xs text-muted">{user.role}</p>
             </div>
+            {user.role === "admin" ? (
+              <button
+                className="rounded-md border border-border bg-white px-3 py-2 text-sm font-medium text-text transition hover:bg-surface"
+                type="button"
+                onClick={() => router.push("/users")}
+              >
+                Користувачі
+              </button>
+            ) : null}
             <button
               className="rounded-md border border-border bg-white px-3 py-2 text-sm font-medium text-text transition hover:bg-surface"
               type="button"
@@ -120,20 +146,51 @@ export default function TicketsPage() {
       </header>
 
       <section className="mx-auto max-w-6xl px-4 py-6">
-        <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+        <div className="mb-4 flex flex-col justify-between gap-3 lg:flex-row lg:items-end">
           <div>
             <h2 className="text-lg font-semibold text-text">Список заявок</h2>
             <p className="text-sm text-muted">Усього: {tickets.length}</p>
           </div>
-          {user.role === "client" ? (
-            <button
-              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white transition hover:bg-primary/90"
-              type="button"
-              onClick={() => router.push("/tickets/new")}
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <select
+              className="rounded-md border border-border bg-white px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as TicketStatus | "")}
             >
-              Нова заявка
-            </button>
-          ) : null}
+              <option value="">Усі статуси</option>
+              {statuses.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
+
+            <select
+              className="rounded-md border border-border bg-white px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
+              value={priorityFilter}
+              onChange={(event) =>
+                setPriorityFilter(event.target.value as TicketPriority | "")
+              }
+            >
+              <option value="">Усі пріоритети</option>
+              {priorities.map((priority) => (
+                <option key={priority} value={priority}>
+                  {priority}
+                </option>
+              ))}
+            </select>
+
+            {user.role === "client" ? (
+              <button
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-white transition hover:bg-primary/90"
+                type="button"
+                onClick={() => router.push("/tickets/new")}
+              >
+                Нова заявка
+              </button>
+            ) : null}
+          </div>
         </div>
 
         {error ? (
@@ -163,7 +220,7 @@ export default function TicketsPage() {
                 ) : tickets.length === 0 ? (
                   <tr>
                     <td className="px-4 py-6 text-muted" colSpan={4}>
-                      Заявок не знайдено
+                      Заявок не знайдено.
                     </td>
                   </tr>
                 ) : (
