@@ -2,7 +2,8 @@ package main
 
 import (
 	"log"
-	"time"
+
+	"github.com/gin-gonic/gin"
 
 	"ticketflow-api/internal/config"
 	"ticketflow-api/internal/database"
@@ -13,26 +14,25 @@ import (
 
 func main() {
 	cfg := config.Load()
+	gin.SetMode(cfg.GinMode)
 
 	database := database.InitDB(cfg)
 
-	// ── Репозиторії ───────────────────────────────────────────────────────────
 	userRepo := repository.NewUserRepository(database)
 	ticketRepo := repository.NewTicketRepository(database)
 
-	// ── Обробники ─────────────────────────────────────────────────────────────
 	authHandler := handlers.NewAuthHandler(
 		userRepo,
 		cfg.JWTSecret,
-		24*time.Hour,
+		cfg.JWTTTL,
 	)
 	ticketHandler := handlers.NewTicketHandler(ticketRepo)
 	userHandler := handlers.NewUserHandler(userRepo)
 	attachmentHandler := handlers.NewAttachmentHandler(database)
 
-	// ── Маршрутизатор ─────────────────────────────────────────────────────────
 	r := router.Setup(
 		cfg.JWTSecret,
+		cfg.FrontendOrigin,
 		authHandler,
 		ticketHandler,
 		attachmentHandler,
@@ -40,7 +40,7 @@ func main() {
 		userRepo,
 	)
 
-	log.Printf("Сервер запущено на порту %s", cfg.ServerPort)
+	log.Printf("Сервер запущено на порті %s", cfg.ServerPort)
 	if err := r.Run(":" + cfg.ServerPort); err != nil {
 		log.Fatalf("server: %v", err)
 	}
