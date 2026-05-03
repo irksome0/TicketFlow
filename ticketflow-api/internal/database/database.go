@@ -4,6 +4,7 @@ package database
 import (
 	"fmt"
 	"log"
+
 	"ticketflow-api/internal/config"
 	"ticketflow-api/internal/models"
 
@@ -25,11 +26,13 @@ func InitDB(cfg *config.Config) *gorm.DB {
 		log.Fatalf("Помилка підключення до бази даних: %v", err)
 	}
 
-	// AutoMigrate створює таблиці, якщо вони ще не існують
+	ensureTicketStatusValues(database)
+
 	if err := database.AutoMigrate(
 		&models.Organization{},
 		&models.User{},
 		&models.Ticket{},
+		&models.TicketStatusHistory{},
 		&models.Attachment{},
 		&models.TicketComment{},
 	); err != nil {
@@ -38,4 +41,14 @@ func InitDB(cfg *config.Config) *gorm.DB {
 
 	log.Println("Підключення до бази даних встановлено успішно")
 	return database
+}
+
+func ensureTicketStatusValues(database *gorm.DB) {
+	values := []string{"Pending", "Waiting for Customer", "On Hold"}
+	for _, value := range values {
+		query := fmt.Sprintf("ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS '%s'", value)
+		if err := database.Exec(query).Error; err != nil {
+			log.Printf("Не вдалося оновити enum ticket_status значенням %q: %v", value, err)
+		}
+	}
 }

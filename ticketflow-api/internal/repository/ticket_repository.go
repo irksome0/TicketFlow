@@ -9,9 +9,6 @@ import (
 	"ticketflow-api/internal/models"
 )
 
-// ── Фільтр ───────────────────────────────────────────────────────────────────
-
-// TicketFilter містить опціональні параметри фільтрації списку заявок.
 type TicketFilter struct {
 	Status     *models.TicketStatus
 	Priority   *models.TicketPriority
@@ -19,50 +16,54 @@ type TicketFilter struct {
 	CreatorID  *uuid.UUID
 }
 
-// ── Інтерфейс ─────────────────────────────────────────────────────────────────
-
 type TicketRepository interface {
 	Create(ticket *models.Ticket) error
 	FindByID(id uuid.UUID) (*models.Ticket, error)
-	ListByOrganization(
-		orgID uuid.UUID,
-		filter TicketFilter,
-	) ([]models.Ticket, error)
+	ListByOrganization(orgID uuid.UUID, filter TicketFilter) ([]models.Ticket, error)
 	UpdateStatus(
 		id uuid.UUID,
-		status models.TicketStatus,
+		fromStatus models.TicketStatus,
+		toStatus models.TicketStatus,
 		resolvedAt *time.Time,
+		changedBy uuid.UUID,
 	) error
+	ListStatusHistory(ticketID uuid.UUID) ([]models.TicketStatusHistory, error)
 	AssignTo(id uuid.UUID, assigneeID uuid.UUID) error
 	CreateComment(comment *models.TicketComment) error
 	ListComments(ticketID uuid.UUID) ([]models.TicketComment, error)
 }
 
-// ── Реалізація ────────────────────────────────────────────────────────────────
-
 type ticketRepository struct {
 	db *gorm.DB
 }
 
-// NewTicketRepository створює новий екземпляр ticketRepository.
 func NewTicketRepository(db *gorm.DB) TicketRepository {
 	return &ticketRepository{db: db}
 }
 
-// Create зберігає нову заявку у базі даних.
 func (r *ticketRepository) Create(ticket *models.Ticket) error {
-	return r.db.Create(ticket).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(ticket).Error; err != nil {
+			return err
+		}
+
+		return tx.Create(&models.TicketStatusHistory{
+			TicketID:   ticket.ID,
+			ChangedBy:  ticket.CreatorID,
+			FromStatus: nil,
+			ToStatus:   ticket.Status,
+		}).Error
+	})
 }
 
-// FindByID повертає заявку за її ідентифікатором разом із вкладеннями
-// та коментарями.
-func (r *ticketRepository) FindByID(
-	id uuid.UUID,
-) (*models.Ticket, error) {
+func (r *ticketRepository) FindByID(id uuid.UUID) (*models.Ticket, error) {
 	var ticket models.Ticket
 	err := r.db.
 		Preload("Attachments").
 		Preload("Comments").
+		Preload("StatusHistory", func(db *gorm.DB) *gorm.DB {
+			return db.Order("created_at ASC")
+		}).
 		Where("id = ?", id).
 		First(&ticket).Error
 	if err != nil {
@@ -71,8 +72,6 @@ func (r *ticketRepository) FindByID(
 	return &ticket, nil
 }
 
-// ListByOrganization повертає список заявок організації з урахуванням
-// опціональних фільтрів. Записи впорядковано від найновіших до найстаріших.
 func (r *ticketRepository) ListByOrganization(
 	orgID uuid.UUID,
 	filter TicketFilter,
@@ -101,25 +100,46 @@ func (r *ticketRepository) ListByOrganization(
 	return tickets, err
 }
 
-// UpdateStatus оновлює статус заявки. Якщо новий статус — Resolved,
-// встановлюється час вирішення (resolved_at). При переході до будь-якого
-// іншого статусу поле resolved_at скидається.
 func (r *ticketRepository) UpdateStatus(
 	id uuid.UUID,
-	status models.TicketStatus,
+	fromStatus models.TicketStatus,
+	toStatus models.TicketStatus,
 	resolvedAt *time.Time,
+	changedBy uuid.UUID,
 ) error {
-	updates := map[string]any{
-		"status":      status,
-		"resolved_at": resolvedAt,
-		"updated_at":  time.Now(),
-	}
-	return r.db.Model(&models.Ticket{}).
-		Where("id = ?", id).
-		Updates(updates).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		updates := map[string]any{
+			"status":      toStatus,
+			"resolved_at": resolvedAt,
+			"updated_at":  time.Now().UTC(),
+		}
+
+		if err := tx.Model(&models.Ticket{}).
+			Where("id = ?", id).
+			Updates(updates).Error; err != nil {
+			return err
+		}
+
+		return tx.Create(&models.TicketStatusHistory{
+			TicketID:   id,
+			ChangedBy:  changedBy,
+			FromStatus: &fromStatus,
+			ToStatus:   toStatus,
+		}).Error
+	})
 }
 
-// AssignTo призначає заявку конкретному виконавцю.
+func (r *ticketRepository) ListStatusHistory(
+	ticketID uuid.UUID,
+) ([]models.TicketStatusHistory, error) {
+	var history []models.TicketStatusHistory
+	err := r.db.
+		Where("ticket_id = ?", ticketID).
+		Order("created_at ASC").
+		Find(&history).Error
+	return history, err
+}
+
 func (r *ticketRepository) AssignTo(
 	id uuid.UUID,
 	assigneeID uuid.UUID,
@@ -128,18 +148,16 @@ func (r *ticketRepository) AssignTo(
 		Where("id = ?", id).
 		Updates(map[string]any{
 			"assignee_id": assigneeID,
-			"updated_at":  time.Now(),
+			"updated_at":  time.Now().UTC(),
 		}).Error
 }
 
-// CreateComment зберігає новий коментар до заявки.
 func (r *ticketRepository) CreateComment(
 	comment *models.TicketComment,
 ) error {
 	return r.db.Create(comment).Error
 }
 
-// ListComments повертає всі коментарі заявки у хронологічному порядку.
 func (r *ticketRepository) ListComments(
 	ticketID uuid.UUID,
 ) ([]models.TicketComment, error) {

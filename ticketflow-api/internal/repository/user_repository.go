@@ -51,5 +51,8 @@ func (r *userRepository) ListByOrganization(
 func (r *userRepository) UpdateRole(id uuid.UUID, role models.Role) error {
 	return r.db.Model(&models.User{}).
 		Where("id = ?", id).
-		Update("role", role).Error
+		Updates(map[string]any{
+			"role":          role,
+			"token_version": gorm.Expr("token_version + 1"),
+		}).Error
 }

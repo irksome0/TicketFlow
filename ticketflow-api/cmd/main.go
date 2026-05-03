@@ -37,6 +37,7 @@ func main() {
 		ticketHandler,
 		attachmentHandler,
 		userHandler,
+		userRepo,
 	)
 
 	log.Printf("Сервер запущено на порту %s", cfg.ServerPort)

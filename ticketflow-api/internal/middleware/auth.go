@@ -4,21 +4,24 @@ package middleware
 import (
 	"net/http"
 	"strings"
-	"ticketflow-api/internal/models"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+
+	"ticketflow-api/internal/models"
+	"ticketflow-api/internal/repository"
 )
 
 type Claims struct {
 	UserID         uuid.UUID   `json:"user_id"`
 	OrganizationID uuid.UUID   `json:"organization_id"`
 	Role           models.Role `json:"role"`
+	TokenVersion   int         `json:"token_version"`
 	jwt.RegisteredClaims
 }
 
-func AuthMiddleware(jwtSecret string) gin.HandlerFunc {
+func AuthMiddleware(jwtSecret string, userRepo repository.UserRepository) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
@@ -49,22 +52,35 @@ func AuthMiddleware(jwtSecret string) gin.HandlerFunc {
 			return
 		}
 
-		// Запис даних користувача у контекст запиту
 		if claims.UserID == uuid.Nil || claims.OrganizationID == uuid.Nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "РќРµРєРѕСЂРµРєС‚РЅС– РґР°РЅС– С‚РѕРєРµРЅР°",
+				"error": "Некоректні дані токена",
 			})
 			return
 		}
 
-		c.Set("user_id", claims.UserID)
-		c.Set("organization_id", claims.OrganizationID)
-		c.Set("role", claims.Role)
+		user, err := userRepo.FindByID(claims.UserID)
+		if err != nil || user.OrganizationID != claims.OrganizationID {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "Користувача не знайдено або токен відкликано",
+			})
+			return
+		}
+
+		if user.TokenVersion != claims.TokenVersion {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "Токен відкликано",
+			})
+			return
+		}
+
+		c.Set("user_id", user.ID)
+		c.Set("organization_id", user.OrganizationID)
+		c.Set("role", user.Role)
 		c.Next()
 	}
 }
 
-// RequireRole перевіряє, чи має поточний користувач необхідну роль
 func RequireRole(roles ...models.Role) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		currentRole, exists := c.Get("role")
