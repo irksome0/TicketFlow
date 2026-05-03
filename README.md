@@ -11,7 +11,7 @@ Recommended Vercel project settings:
 - Root Directory: `ticketflow-web`
 - Install Command: `npm install`
 - Build Command: `npm run build`
-- Output Directory: `.next`
+- Output Directory: leave empty and let Vercel detect the Next.js output
 
 Required frontend environment variable:
 
