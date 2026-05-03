@@ -4,6 +4,7 @@ package database
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"ticketflow-api/internal/config"
 	"ticketflow-api/internal/models"
@@ -15,8 +16,14 @@ import (
 
 func InitDB(cfg *config.Config) *gorm.DB {
 	dsn := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable TimeZone=UTC",
-		cfg.DBHost, cfg.DBPort, cfg.DBUser, cfg.DBPassword, cfg.DBName,
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=%s",
+		cfg.DBHost,
+		cfg.DBPort,
+		cfg.DBUser,
+		cfg.DBPassword,
+		cfg.DBName,
+		cfg.DBSSLMode,
+		cfg.DBTimeZone,
 	)
 
 	database, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
@@ -26,7 +33,7 @@ func InitDB(cfg *config.Config) *gorm.DB {
 		log.Fatalf("Помилка підключення до бази даних: %v", err)
 	}
 
-	ensureTicketStatusValues(database)
+	bootstrapPostgres(database)
 
 	if err := database.AutoMigrate(
 		&models.Organization{},
@@ -43,12 +50,61 @@ func InitDB(cfg *config.Config) *gorm.DB {
 	return database
 }
 
-func ensureTicketStatusValues(database *gorm.DB) {
-	values := []string{"Pending", "Waiting for Customer", "On Hold"}
+func bootstrapPostgres(database *gorm.DB) {
+	statements := []string{
+		`CREATE EXTENSION IF NOT EXISTS pgcrypto`,
+		createEnumSQL("user_role", []string{"client", "operator", "engineer", "admin"}),
+		createEnumSQL("ticket_priority", []string{"High", "Medium", "Low"}),
+		createEnumSQL("ticket_status", []string{
+			"New",
+			"In Progress",
+			"Pending",
+			"Waiting for Customer",
+			"On Hold",
+			"Resolved",
+			"Closed",
+			"Reopened",
+		}),
+	}
+
+	for _, statement := range statements {
+		if err := database.Exec(statement).Error; err != nil {
+			log.Fatalf("Помилка підготовки PostgreSQL схеми: %v", err)
+		}
+	}
+
+	ensureEnumValues(database, "ticket_status", []string{
+		"Pending",
+		"Waiting for Customer",
+		"On Hold",
+	})
+}
+
+func createEnumSQL(name string, values []string) string {
+	quoted := make([]string, len(values))
+	for i, value := range values {
+		quoted[i] = "'" + strings.ReplaceAll(value, "'", "''") + "'"
+	}
+
+	return fmt.Sprintf(`
+DO $$
+BEGIN
+	IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = '%s') THEN
+		CREATE TYPE %s AS ENUM (%s);
+	END IF;
+END
+$$;`, name, name, strings.Join(quoted, ", "))
+}
+
+func ensureEnumValues(database *gorm.DB, name string, values []string) {
 	for _, value := range values {
-		query := fmt.Sprintf("ALTER TYPE ticket_status ADD VALUE IF NOT EXISTS '%s'", value)
-		if err := database.Exec(query).Error; err != nil {
-			log.Printf("Не вдалося оновити enum ticket_status значенням %q: %v", value, err)
+		statement := fmt.Sprintf(
+			"ALTER TYPE %s ADD VALUE IF NOT EXISTS '%s'",
+			name,
+			strings.ReplaceAll(value, "'", "''"),
+		)
+		if err := database.Exec(statement).Error; err != nil {
+			log.Printf("Не вдалося оновити enum %s значенням %q: %v", name, value, err)
 		}
 	}
 }

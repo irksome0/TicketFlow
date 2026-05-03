@@ -9,6 +9,11 @@
 bin/
 dist/
 
+# Local environment
+.env
+.env.*
+!.env.example
+
 # Test coverage
 *.out
 coverage.html
