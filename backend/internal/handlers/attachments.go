@@ -178,10 +178,11 @@ func (h *AttachmentHandler) Upload(c *gin.Context) {
 		return
 	}
 
+	originalFileName := filepath.Base(fileHeader.Filename)
 	uniqueFileName := fmt.Sprintf(
 		"%s_%s",
 		uuid.New().String(),
-		filepath.Base(fileHeader.Filename),
+		originalFileName,
 	)
 	filePath := filepath.Join(uploadDir, uniqueFileName)
 
@@ -197,7 +198,7 @@ func (h *AttachmentHandler) Upload(c *gin.Context) {
 	attachment := &models.Attachment{
 		TicketID:    ticketID,
 		UploaderID:  userID,
-		FileName:    fileHeader.Filename,
+		FileName:    originalFileName,
 		FilePath:    filePath,
 		FileSize:    int(fileHeader.Size),
 		ContentType: contentType,
@@ -224,6 +225,13 @@ func (h *AttachmentHandler) GetByTicket(c *gin.Context) {
 	userID := c.MustGet("user_id").(uuid.UUID)
 	orgID := c.MustGet("organization_id").(uuid.UUID)
 	role := c.MustGet("role").(models.Role)
+
+	if role == models.RoleAdmin {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "адміністратор не має доступу до вкладень",
+		})
+		return
+	}
 
 	ticketID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -338,24 +346,19 @@ func (h *AttachmentHandler) Download(c *gin.Context) {
 		return
 	}
 
-	// Відновлюємо шлях до файлу згідно зі стандартом зберігання:
-	// uploads/{orgID}/{ticketID}/{attachmentID}_{originalFileName}
-	storedName := fmt.Sprintf(
-		"%s_%s",
-		attachment.ID.String(),
-		attachment.FileName,
-	)
-	filePath := filepath.Join(
-		uploadBasePath,
-		orgID.String(),
-		ticketID.String(),
-		storedName,
-	)
+	filePath := attachment.FilePath
 
 	// Перевіряємо фізичну наявність файлу у файловій системі
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "файл не знайдено на сервері",
+		})
+		return
+	}
+	if fileInfo.IsDir() {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "шлях вкладення не є файлом",
 		})
 		return
 	}
