@@ -3,15 +3,16 @@ package repository
 import (
 	"ticketflow-api/internal/models"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type UserRepository interface {
 	Create(user *models.User) error
 	FindByEmail(email string) (*models.User, error)
-	FindByID(id string) (*models.User, error)
-	ListByOrganization(orgID string) ([]models.User, error)
-	UpdateRole(id string, role models.Role) error
+	FindByID(id uuid.UUID) (*models.User, error)
+	ListByOrganization(orgID uuid.UUID) ([]models.User, error)
+	UpdateRole(id uuid.UUID, role models.Role) error
 }
 
 type userRepository struct {
@@ -33,21 +34,21 @@ func (r *userRepository) FindByEmail(email string) (*models.User, error) {
 	return &user, err
 }
 
-func (r *userRepository) FindByID(id string) (*models.User, error) {
+func (r *userRepository) FindByID(id uuid.UUID) (*models.User, error) {
 	var user models.User
 	err := r.db.Where("id = ?", id).First(&user).Error
 	return &user, err
 }
 
 func (r *userRepository) ListByOrganization(
-	orgID string,
+	orgID uuid.UUID,
 ) ([]models.User, error) {
 	var users []models.User
 	err := r.db.Where("organization_id = ?", orgID).Find(&users).Error
 	return users, err
 }
 
-func (r *userRepository) UpdateRole(id string, role models.Role) error {
+func (r *userRepository) UpdateRole(id uuid.UUID, role models.Role) error {
 	return r.db.Model(&models.User{}).
 		Where("id = ?", id).
 		Update("role", role).Error
