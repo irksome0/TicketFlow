@@ -19,8 +19,8 @@ import (
 // ── Константи та допоміжні дані ───────────────────────────────────────────────
 
 const (
-	// maxUploadSize визначає максимально допустимий розмір вкладення (5 МБ).
-	maxUploadSize = 5 << 20
+	// maxUploadSize визначає максимально допустимий розмір вкладення (25 МБ).
+	maxUploadSize = 25 << 20
 
 	// uploadBasePath — кореневий каталог зберігання файлів.
 	uploadBasePath = "uploads"
@@ -146,7 +146,7 @@ func (h *AttachmentHandler) Upload(c *gin.Context) {
 	// Перевірка розміру файлу
 	if fileHeader.Size > maxUploadSize {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Розмір файлу перевищує допустимий ліміт у 5 МБ",
+			"error": "Розмір файлу перевищує допустимий ліміт у 25 МБ",
 		})
 		return
 	}

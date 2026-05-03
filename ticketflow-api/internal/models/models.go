@@ -30,6 +30,9 @@ const (
 const (
 	StatusNew        TicketStatus = "New"
 	StatusInProgress TicketStatus = "In Progress"
+	StatusPending    TicketStatus = "Pending"
+	StatusWaiting    TicketStatus = "Waiting for Customer"
+	StatusOnHold     TicketStatus = "On Hold"
 	StatusResolved   TicketStatus = "Resolved"
 	StatusClosed     TicketStatus = "Closed"
 	StatusReopened   TicketStatus = "Reopened"
@@ -52,6 +55,7 @@ type User struct {
 	Email          string    `gorm:"type:varchar(255);unique;not null"`
 	PasswordHash   string    `gorm:"type:varchar(255);not null"`
 	Role           Role      `gorm:"type:user_role;not null"`
+	TokenVersion   int       `gorm:"not null;default:1"`
 	FirstName      string    `gorm:"type:varchar(100);not null"`
 	LastName       string    `gorm:"type:varchar(100);not null"`
 	CreatedAt      time.Time
@@ -73,10 +77,25 @@ type Ticket struct {
 	UpdatedAt      time.Time
 
 	// Навігаційні властивості GORM
-	Creator     User            `gorm:"foreignKey:CreatorID"`
-	Assignee    *User           `gorm:"foreignKey:AssigneeID"`
-	Attachments []Attachment    `gorm:"foreignKey:TicketID"`
-	Comments    []TicketComment `gorm:"foreignKey:TicketID"`
+	Creator       User                  `gorm:"foreignKey:CreatorID"`
+	Assignee      *User                 `gorm:"foreignKey:AssigneeID"`
+	Attachments   []Attachment          `gorm:"foreignKey:TicketID"`
+	Comments      []TicketComment       `gorm:"foreignKey:TicketID"`
+	StatusHistory []TicketStatusHistory `gorm:"foreignKey:TicketID"`
+}
+
+// TicketStatusHistory зберігає історію переходів між статусами заявки.
+// Вона використовується для аудиту та розрахунку SLA як суми активних інтервалів.
+type TicketStatusHistory struct {
+	ID         uuid.UUID     `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	TicketID   uuid.UUID     `gorm:"type:uuid;not null;index"`
+	ChangedBy  uuid.UUID     `gorm:"type:uuid;not null"`
+	FromStatus *TicketStatus `gorm:"type:ticket_status"`
+	ToStatus   TicketStatus  `gorm:"type:ticket_status;not null"`
+	CreatedAt  time.Time
+
+	Ticket Ticket `gorm:"foreignKey:TicketID"`
+	User   User   `gorm:"foreignKey:ChangedBy"`
 }
 
 // Attachment описує файл, прикріплений до заявки

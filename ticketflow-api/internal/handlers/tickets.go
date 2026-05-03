@@ -13,8 +13,6 @@ import (
 	"ticketflow-api/internal/repository"
 )
 
-// ── Handler ───────────────────────────────────────────────────────────────────
-
 type TicketHandler struct {
 	ticketRepo repository.TicketRepository
 }
@@ -22,8 +20,6 @@ type TicketHandler struct {
 func NewTicketHandler(ticketRepo repository.TicketRepository) *TicketHandler {
 	return &TicketHandler{ticketRepo: ticketRepo}
 }
-
-// ── DTO ───────────────────────────────────────────────────────────────────────
 
 type createTicketRequest struct {
 	Title       string                `json:"title"       binding:"required,min=3,max=255"`
@@ -36,31 +32,43 @@ type updateStatusRequest struct {
 }
 
 type ticketResponse struct {
-	ID             uuid.UUID             `json:"id"`
-	OrganizationID uuid.UUID             `json:"organization_id"`
-	CreatorID      uuid.UUID             `json:"creator_id"`
-	AssigneeID     *uuid.UUID            `json:"assignee_id"`
-	Title          string                `json:"title"`
-	Description    string                `json:"description"`
-	Status         models.TicketStatus   `json:"status"`
-	Priority       models.TicketPriority `json:"priority"`
-	CreatedAt      time.Time             `json:"created_at"`
-	ResolvedAt     *time.Time            `json:"resolved_at"`
-	UpdatedAt      time.Time             `json:"updated_at"`
+	ID                    uuid.UUID               `json:"id"`
+	OrganizationID        uuid.UUID               `json:"organization_id"`
+	CreatorID             uuid.UUID               `json:"creator_id"`
+	AssigneeID            *uuid.UUID              `json:"assignee_id"`
+	Title                 string                  `json:"title"`
+	Description           string                  `json:"description"`
+	Status                models.TicketStatus     `json:"status"`
+	Priority              models.TicketPriority   `json:"priority"`
+	CreatedAt             time.Time               `json:"created_at"`
+	ResolvedAt            *time.Time              `json:"resolved_at"`
+	UpdatedAt             time.Time               `json:"updated_at"`
+	SlaLimitSeconds       int64                   `json:"sla_limit_seconds"`
+	ActiveDurationSeconds int64                   `json:"active_duration_seconds"`
+	SlaStatus             string                  `json:"sla_status"`
+	StatusHistory         []statusHistoryResponse `json:"status_history,omitempty"`
 }
 
-// ── Матриця переходів статусів ────────────────────────────────────────────────
+type statusHistoryResponse struct {
+	ID         uuid.UUID            `json:"id"`
+	TicketID   uuid.UUID            `json:"ticket_id"`
+	ChangedBy  uuid.UUID            `json:"changed_by"`
+	FromStatus *models.TicketStatus `json:"from_status"`
+	ToStatus   models.TicketStatus  `json:"to_status"`
+	CreatedAt  time.Time            `json:"created_at"`
+}
 
-// validTransitions визначає дозволені переходи між статусами заявки.
 var validTransitions = map[models.TicketStatus][]models.TicketStatus{
-	models.StatusNew:        {models.StatusInProgress, models.StatusClosed},
-	models.StatusInProgress: {models.StatusResolved, models.StatusClosed},
+	models.StatusNew:        {models.StatusInProgress, models.StatusPending, models.StatusClosed},
+	models.StatusInProgress: {models.StatusPending, models.StatusWaiting, models.StatusOnHold, models.StatusResolved, models.StatusClosed},
+	models.StatusPending:    {models.StatusInProgress, models.StatusWaiting, models.StatusOnHold, models.StatusClosed},
+	models.StatusWaiting:    {models.StatusInProgress, models.StatusOnHold, models.StatusClosed},
+	models.StatusOnHold:     {models.StatusInProgress, models.StatusPending, models.StatusClosed},
 	models.StatusResolved:   {models.StatusClosed},
 	models.StatusClosed:     {models.StatusReopened},
-	models.StatusReopened:   {models.StatusInProgress, models.StatusClosed},
+	models.StatusReopened:   {models.StatusInProgress, models.StatusPending, models.StatusClosed},
 }
 
-// roleAllowedTargets визначає статуси, до яких роль може переводити заявку.
 var roleAllowedTargets = map[models.Role]map[models.TicketStatus]bool{
 	models.RoleClient: {
 		models.StatusClosed:   true,
@@ -68,27 +76,31 @@ var roleAllowedTargets = map[models.Role]map[models.TicketStatus]bool{
 	},
 	models.RoleOperator: {
 		models.StatusInProgress: true,
+		models.StatusPending:    true,
+		models.StatusWaiting:    true,
+		models.StatusOnHold:     true,
 		models.StatusResolved:   true,
 		models.StatusClosed:     true,
 		models.StatusReopened:   true,
 	},
 	models.RoleEngineer: {
 		models.StatusInProgress: true,
+		models.StatusPending:    true,
+		models.StatusWaiting:    true,
+		models.StatusOnHold:     true,
 		models.StatusResolved:   true,
 	},
 	models.RoleAdmin: {
 		models.StatusInProgress: true,
+		models.StatusPending:    true,
+		models.StatusWaiting:    true,
+		models.StatusOnHold:     true,
 		models.StatusResolved:   true,
 		models.StatusClosed:     true,
 		models.StatusReopened:   true,
 	},
 }
 
-// ── Handlers ──────────────────────────────────────────────────────────────────
-
-// ListTickets — GET /api/v1/tickets
-// Повертає список заявок організації поточного користувача.
-// Підтримує фільтрацію через query-параметри: status, priority.
 func (h *TicketHandler) ListTickets(c *gin.Context) {
 	orgID, ok := mustGetOrgID(c)
 	if !ok {
@@ -104,14 +116,21 @@ func (h *TicketHandler) ListTickets(c *gin.Context) {
 
 	if s := c.Query("status"); s != "" {
 		status := models.TicketStatus(s)
+		if !isValidStatus(status) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "невалідне значення статусу"})
+			return
+		}
 		filter.Status = &status
 	}
 	if p := c.Query("priority"); p != "" {
 		priority := models.TicketPriority(p)
+		if !isValidPriority(priority) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "невалідне значення пріоритету"})
+			return
+		}
 		filter.Priority = &priority
 	}
 
-	// Client бачить лише власні заявки.
 	if role == models.RoleClient {
 		userID, ok := mustGetUserID(c)
 		if !ok {
@@ -122,9 +141,7 @@ func (h *TicketHandler) ListTickets(c *gin.Context) {
 
 	tickets, err := h.ticketRepo.ListByOrganization(orgID, filter)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "помилка отримання заявок",
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "помилка отримання заявок"})
 		return
 	}
 
@@ -139,8 +156,6 @@ func (h *TicketHandler) ListTickets(c *gin.Context) {
 	})
 }
 
-// CreateTicket — POST /api/v1/tickets
-// Створює нову заявку. Автором є поточний автентифікований користувач.
 func (h *TicketHandler) CreateTicket(c *gin.Context) {
 	var req createTicketRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -158,9 +173,7 @@ func (h *TicketHandler) CreateTicket(c *gin.Context) {
 	}
 
 	if !isValidPriority(req.Priority) {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "невалідне значення пріоритету",
-		})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "невалідне значення пріоритету"})
 		return
 	}
 
@@ -175,17 +188,19 @@ func (h *TicketHandler) CreateTicket(c *gin.Context) {
 	}
 
 	if err := h.ticketRepo.Create(ticket); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "помилка створення заявки",
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "помилка створення заявки"})
 		return
 	}
 
-	c.JSON(http.StatusCreated, toTicketResponse(*ticket))
+	created, err := h.ticketRepo.FindByID(ticket.ID)
+	if err != nil {
+		c.JSON(http.StatusCreated, toTicketResponse(*ticket))
+		return
+	}
+
+	c.JSON(http.StatusCreated, toTicketResponse(*created))
 }
 
-// GetTicket — GET /api/v1/tickets/:id
-// Повертає детальну інформацію про заявку разом із вкладеннями та коментарями.
 func (h *TicketHandler) GetTicket(c *gin.Context) {
 	ticketID, ok := mustParseTicketID(c)
 	if !ok {
@@ -207,13 +222,10 @@ func (h *TicketHandler) GetTicket(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "заявку не знайдено"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "помилка отримання заявки",
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "помилка отримання заявки"})
 		return
 	}
 
-	// Захист multi-tenant: перевірка належності заявки до організації.
 	if ticket.OrganizationID != orgID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "доступ заборонено"})
 		return
@@ -233,12 +245,14 @@ func (h *TicketHandler) GetTicket(c *gin.Context) {
 	c.JSON(http.StatusOK, toTicketResponse(*ticket))
 }
 
-// UpdateTicketStatus — PATCH /api/v1/tickets/:id/status
-// Змінює статус заявки відповідно до матриці переходів та ролі користувача.
 func (h *TicketHandler) UpdateTicketStatus(c *gin.Context) {
 	var req updateStatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !isValidStatus(req.Status) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "невалідне значення статусу"})
 		return
 	}
 
@@ -254,6 +268,10 @@ func (h *TicketHandler) UpdateTicketStatus(c *gin.Context) {
 	if !ok {
 		return
 	}
+	userID, ok := mustGetUserID(c)
+	if !ok {
+		return
+	}
 
 	ticket, err := h.ticketRepo.FindByID(ticketID)
 	if err != nil {
@@ -261,38 +279,25 @@ func (h *TicketHandler) UpdateTicketStatus(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "заявку не знайдено"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "помилка отримання заявки",
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "помилка отримання заявки"})
 		return
 	}
 
-	// Захист multi-tenant.
 	if ticket.OrganizationID != orgID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "доступ заборонено"})
 		return
 	}
 
-	if role == models.RoleClient {
-		userID, ok := mustGetUserID(c)
-		if !ok {
-			return
-		}
-		if ticket.CreatorID != userID {
-			c.JSON(http.StatusForbidden, gin.H{"error": "доступ заборонено"})
-			return
-		}
-	}
-
-	// Перевірка дозволу ролі на цільовий статус.
-	if !roleAllowedTargets[role][req.Status] {
-		c.JSON(http.StatusForbidden, gin.H{
-			"error": "ваша роль не може встановити цей статус",
-		})
+	if role == models.RoleClient && ticket.CreatorID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "доступ заборонено"})
 		return
 	}
 
-	// Перевірка валідності переходу статусу.
+	if !roleAllowedTargets[role][req.Status] {
+		c.JSON(http.StatusForbidden, gin.H{"error": "ваша роль не може встановити цей статус"})
+		return
+	}
+
 	if !isValidTransition(ticket.Status, req.Status) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"error":            "недопустимий перехід статусу",
@@ -302,33 +307,31 @@ func (h *TicketHandler) UpdateTicketStatus(c *gin.Context) {
 		return
 	}
 
-	// Встановлення resolved_at лише при переході до Resolved.
 	var resolvedAt *time.Time
 	if req.Status == models.StatusResolved {
-		now := time.Now()
+		now := time.Now().UTC()
 		resolvedAt = &now
 	}
 
-	if err := h.ticketRepo.UpdateStatus(ticketID, req.Status, resolvedAt); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "помилка оновлення статусу",
-		})
+	if err := h.ticketRepo.UpdateStatus(
+		ticketID,
+		ticket.Status,
+		req.Status,
+		resolvedAt,
+		userID,
+	); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "помилка оновлення статусу"})
 		return
 	}
 
-	// Повернути оновлений стан заявки.
 	updated, err := h.ticketRepo.FindByID(ticketID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "помилка отримання оновленої заявки",
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "помилка отримання оновленої заявки"})
 		return
 	}
 
 	c.JSON(http.StatusOK, toTicketResponse(*updated))
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 func isValidTransition(from, to models.TicketStatus) bool {
 	allowed, exists := validTransitions[from]
@@ -347,27 +350,129 @@ func isValidPriority(p models.TicketPriority) bool {
 	switch p {
 	case models.PriorityHigh, models.PriorityMedium, models.PriorityLow:
 		return true
+	default:
+		return false
 	}
-	return false
+}
+
+func isValidStatus(status models.TicketStatus) bool {
+	switch status {
+	case models.StatusNew,
+		models.StatusInProgress,
+		models.StatusPending,
+		models.StatusWaiting,
+		models.StatusOnHold,
+		models.StatusResolved,
+		models.StatusClosed,
+		models.StatusReopened:
+		return true
+	default:
+		return false
+	}
 }
 
 func toTicketResponse(t models.Ticket) ticketResponse {
+	limit := slaLimit(t.Priority)
+	active := activeDuration(t, time.Now().UTC())
+
+	history := make([]statusHistoryResponse, len(t.StatusHistory))
+	for i, item := range t.StatusHistory {
+		history[i] = statusHistoryResponse{
+			ID:         item.ID,
+			TicketID:   item.TicketID,
+			ChangedBy:  item.ChangedBy,
+			FromStatus: item.FromStatus,
+			ToStatus:   item.ToStatus,
+			CreatedAt:  item.CreatedAt,
+		}
+	}
+
 	return ticketResponse{
-		ID:             t.ID,
-		OrganizationID: t.OrganizationID,
-		CreatorID:      t.CreatorID,
-		AssigneeID:     t.AssigneeID,
-		Title:          t.Title,
-		Description:    t.Description,
-		Status:         t.Status,
-		Priority:       t.Priority,
-		CreatedAt:      t.CreatedAt,
-		ResolvedAt:     t.ResolvedAt,
-		UpdatedAt:      t.UpdatedAt,
+		ID:                    t.ID,
+		OrganizationID:        t.OrganizationID,
+		CreatorID:             t.CreatorID,
+		AssigneeID:            t.AssigneeID,
+		Title:                 t.Title,
+		Description:           t.Description,
+		Status:                t.Status,
+		Priority:              t.Priority,
+		CreatedAt:             t.CreatedAt,
+		ResolvedAt:            t.ResolvedAt,
+		UpdatedAt:             t.UpdatedAt,
+		SlaLimitSeconds:       int64(limit.Seconds()),
+		ActiveDurationSeconds: int64(active.Seconds()),
+		SlaStatus:             slaStatus(t.Status, active, limit),
+		StatusHistory:         history,
 	}
 }
 
-// mustGetUserID витягує UserID з контексту Gin.
+func slaLimit(priority models.TicketPriority) time.Duration {
+	switch priority {
+	case models.PriorityHigh:
+		return 8 * time.Hour
+	case models.PriorityLow:
+		return 72 * time.Hour
+	default:
+		return 24 * time.Hour
+	}
+}
+
+func activeDuration(ticket models.Ticket, now time.Time) time.Duration {
+	if len(ticket.StatusHistory) == 0 {
+		end := now
+		if ticket.ResolvedAt != nil {
+			end = *ticket.ResolvedAt
+		}
+		if end.Before(ticket.CreatedAt) {
+			return 0
+		}
+		return end.Sub(ticket.CreatedAt)
+	}
+
+	var total time.Duration
+	for i, item := range ticket.StatusHistory {
+		start := item.CreatedAt
+		end := now
+		if i+1 < len(ticket.StatusHistory) {
+			end = ticket.StatusHistory[i+1].CreatedAt
+		} else if ticket.ResolvedAt != nil && ticket.ResolvedAt.Before(now) {
+			end = *ticket.ResolvedAt
+		}
+
+		if isActiveSLAStatus(item.ToStatus) && end.After(start) {
+			total += end.Sub(start)
+		}
+	}
+
+	return total
+}
+
+func isActiveSLAStatus(status models.TicketStatus) bool {
+	switch status {
+	case models.StatusNew, models.StatusInProgress, models.StatusReopened:
+		return true
+	default:
+		return false
+	}
+}
+
+func slaStatus(status models.TicketStatus, active, limit time.Duration) string {
+	switch status {
+	case models.StatusPending, models.StatusWaiting, models.StatusOnHold:
+		return "Paused"
+	case models.StatusResolved, models.StatusClosed:
+		if active <= limit {
+			return "Met"
+		}
+		return "Breached"
+	default:
+		if active <= limit {
+			return "Within SLA"
+		}
+		return "Breached"
+	}
+}
+
 func mustGetUserID(c *gin.Context) (uuid.UUID, bool) {
 	val, exists := c.Get("user_id")
 	if !exists {
@@ -376,15 +481,12 @@ func mustGetUserID(c *gin.Context) (uuid.UUID, bool) {
 	}
 	id, ok := val.(uuid.UUID)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "некоректний формат user_id",
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "некоректний формат user_id"})
 		return uuid.Nil, false
 	}
 	return id, true
 }
 
-// mustGetOrgID витягує OrganizationID з контексту Gin.
 func mustGetOrgID(c *gin.Context) (uuid.UUID, bool) {
 	val, exists := c.Get("organization_id")
 	if !exists {
@@ -393,15 +495,12 @@ func mustGetOrgID(c *gin.Context) (uuid.UUID, bool) {
 	}
 	id, ok := val.(uuid.UUID)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "некоректний формат organization_id",
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "некоректний формат organization_id"})
 		return uuid.Nil, false
 	}
 	return id, true
 }
 
-// mustGetRole витягує Role з контексту Gin.
 func mustGetRole(c *gin.Context) (models.Role, bool) {
 	val, exists := c.Get("role")
 	if !exists {
@@ -410,21 +509,16 @@ func mustGetRole(c *gin.Context) (models.Role, bool) {
 	}
 	role, ok := val.(models.Role)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "некоректний формат role",
-		})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "некоректний формат role"})
 		return "", false
 	}
 	return role, true
 }
 
-// mustParseTicketID парсить UUID заявки з параметрів маршруту.
 func mustParseTicketID(c *gin.Context) (uuid.UUID, bool) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "невалідний ідентифікатор заявки",
-		})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "невалідний ідентифікатор заявки"})
 		return uuid.Nil, false
 	}
 	return id, true

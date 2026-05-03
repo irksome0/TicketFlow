@@ -5,6 +5,7 @@ import (
 	"ticketflow-api/internal/handlers"
 	"ticketflow-api/internal/middleware"
 	"ticketflow-api/internal/models"
+	"ticketflow-api/internal/repository"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,24 +16,21 @@ func Setup(
 	ticketHandler *handlers.TicketHandler,
 	attachmentHandler *handlers.AttachmentHandler,
 	userHandler *handlers.UserHandler,
+	userRepo repository.UserRepository,
 ) *gin.Engine {
 	r := gin.Default()
 
-	// Ліміт розміру тіла запиту (для вкладень — 5 МБ)
-	r.MaxMultipartMemory = 5 << 20
+	r.MaxMultipartMemory = 25 << 20
 
-	// Публічні маршрути (без автентифікації)
 	public := r.Group("/api/v1")
 	{
 		public.POST("/auth/register", authHandler.Register)
 		public.POST("/auth/login", authHandler.Login)
 	}
 
-	// Захищені маршрути
 	protected := r.Group("/api/v1")
-	protected.Use(middleware.AuthMiddleware(jwtSecret))
+	protected.Use(middleware.AuthMiddleware(jwtSecret, userRepo))
 	{
-		// Маршрути заявок
 		tickets := protected.Group("/tickets")
 		{
 			tickets.GET("", ticketHandler.ListTickets)
@@ -40,13 +38,11 @@ func Setup(
 			tickets.GET("/:id", ticketHandler.GetTicket)
 			tickets.PATCH("/:id/status", ticketHandler.UpdateTicketStatus)
 
-			// Вкладення
 			tickets.POST("/:id/attachments", attachmentHandler.Upload)
 			tickets.GET("/:id/attachments", attachmentHandler.GetByTicket)
 			tickets.GET("/:id/attachments/:aid/download", attachmentHandler.Download)
 		}
 
-		// Маршрути управління користувачами (лише Admin)
 		users := protected.Group("/users")
 		users.Use(middleware.RequireRole(models.RoleAdmin))
 		{

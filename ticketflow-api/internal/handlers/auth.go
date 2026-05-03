@@ -71,6 +71,7 @@ type Claims struct {
 	UserID         uuid.UUID   `json:"user_id"`
 	Role           models.Role `json:"role"`
 	OrganizationID uuid.UUID   `json:"organization_id"`
+	TokenVersion   int         `json:"token_version"`
 	jwt.RegisteredClaims
 }
 
@@ -110,6 +111,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		Email:          req.Email,
 		PasswordHash:   string(hash),
 		Role:           models.RoleClient,
+		TokenVersion:   1,
 		FirstName:      req.FirstName,
 		LastName:       req.LastName,
 	}
@@ -191,6 +193,7 @@ func (h *AuthHandler) generateToken(user *models.User) (string, error) {
 		UserID:         user.ID,
 		Role:           user.Role,
 		OrganizationID: user.OrganizationID,
+		TokenVersion:   user.TokenVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   user.ID.String(),
 			IssuedAt:  jwt.NewNumericDate(now),
