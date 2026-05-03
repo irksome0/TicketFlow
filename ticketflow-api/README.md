@@ -40,6 +40,35 @@ go mod download
 go run ./cmd
 ```
 
+## Docker Run
+
+From the repository root:
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+This starts:
+
+- PostgreSQL on `localhost:5432`;
+- TicketFlow API on `localhost:8080`;
+- a local `ticketflow-api/uploads` directory mounted into the API container.
+
+The root `.env` file is used only by Docker Compose and must not be committed.
+
+Stop containers:
+
+```bash
+docker compose down
+```
+
+Remove the local PostgreSQL volume when a clean database is needed:
+
+```bash
+docker compose down -v
+```
+
 Health check:
 
 ```bash
