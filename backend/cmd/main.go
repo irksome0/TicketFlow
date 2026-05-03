@@ -28,9 +28,16 @@ func main() {
 	)
 	ticketHandler := handlers.NewTicketHandler(ticketRepo)
 	userHandler := handlers.NewUserHandler(userRepo)
+	attachmentHandler := handlers.NewAttachmentHandler(database)
 
 	// ── Маршрутизатор ─────────────────────────────────────────────────────────
-	r := router.Setup(cfg, authHandler, ticketHandler, userHandler)
+	r := router.Setup(
+		cfg.JWTSecret,
+		authHandler,
+		ticketHandler,
+		attachmentHandler,
+		userHandler,
+	)
 
 	log.Printf("Сервер запущено на порту %s", cfg.ServerPort)
 	if err := r.Run(":" + cfg.ServerPort); err != nil {

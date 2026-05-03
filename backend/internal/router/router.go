@@ -7,19 +7,19 @@ import (
 	"ticketflow-api/internal/models"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 )
 
-func Setup(db *gorm.DB, jwtSecret string) *gin.Engine {
+func Setup(
+	jwtSecret string,
+	authHandler *handlers.AuthHandler,
+	ticketHandler *handlers.TicketHandler,
+	attachmentHandler *handlers.AttachmentHandler,
+	userHandler *handlers.UserHandler,
+) *gin.Engine {
 	r := gin.Default()
 
 	// Ліміт розміру тіла запиту (для вкладень — 5 МБ)
 	r.MaxMultipartMemory = 5 << 20
-
-	authHandler := handlers.NewAuthHandler(db, jwtSecret)
-	ticketHandler := handlers.NewTicketHandler(db)
-	attachmentHandler := handlers.NewAttachmentHandler(db)
-	userHandler := handlers.NewUserHandler(db)
 
 	// Публічні маршрути (без автентифікації)
 	public := r.Group("/api/v1")
@@ -35,15 +35,15 @@ func Setup(db *gorm.DB, jwtSecret string) *gin.Engine {
 		// Маршрути заявок
 		tickets := protected.Group("/tickets")
 		{
-			tickets.GET("", ticketHandler.GetAll)
-			tickets.POST("", ticketHandler.Create)
-			tickets.GET("/:id", ticketHandler.GetByID)
-			tickets.PATCH("/:id/status", ticketHandler.UpdateStatus)
+			tickets.GET("", ticketHandler.ListTickets)
+			tickets.POST("", ticketHandler.CreateTicket)
+			tickets.GET("/:id", ticketHandler.GetTicket)
+			tickets.PATCH("/:id/status", ticketHandler.UpdateTicketStatus)
 
 			// Вкладення
 			tickets.POST("/:id/attachments", attachmentHandler.Upload)
 			tickets.GET("/:id/attachments", attachmentHandler.GetByTicket)
-			tickets.GET("/:id/attachements/:aid/download", attachmentHandler.Download)
+			tickets.GET("/:id/attachments/:aid/download", attachmentHandler.Download)
 		}
 
 		// Маршрути управління користувачами (лише Admin)

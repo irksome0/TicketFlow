@@ -8,11 +8,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 type Claims struct {
-	UserID         string      `json:"user_id"`
-	OrganizationID string      `json:"organization_id"`
+	UserID         uuid.UUID   `json:"user_id"`
+	OrganizationID uuid.UUID   `json:"organization_id"`
 	Role           models.Role `json:"role"`
 	jwt.RegisteredClaims
 }
@@ -34,6 +35,9 @@ func AuthMiddleware(jwtSecret string) gin.HandlerFunc {
 			tokenStr,
 			claims,
 			func(t *jwt.Token) (interface{}, error) {
+				if t.Method != jwt.SigningMethodHS256 {
+					return nil, jwt.ErrTokenSignatureInvalid
+				}
 				return []byte(jwtSecret), nil
 			},
 		)
@@ -46,6 +50,13 @@ func AuthMiddleware(jwtSecret string) gin.HandlerFunc {
 		}
 
 		// Запис даних користувача у контекст запиту
+		if claims.UserID == uuid.Nil || claims.OrganizationID == uuid.Nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "РќРµРєРѕСЂРµРєС‚РЅС– РґР°РЅС– С‚РѕРєРµРЅР°",
+			})
+			return
+		}
+
 		c.Set("user_id", claims.UserID)
 		c.Set("organization_id", claims.OrganizationID)
 		c.Set("role", claims.Role)
