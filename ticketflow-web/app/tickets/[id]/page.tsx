@@ -11,24 +11,43 @@ import {
   uploadAttachment,
 } from "@/lib/api";
 import { getStoredUser, getToken } from "@/lib/auth";
-import type { Attachment, Ticket, TicketStatus, User } from "@/lib/types";
+import type { Attachment, SlaStatus, Ticket, TicketStatus, User } from "@/lib/types";
 
-const maxUploadSize = 5 * 1024 * 1024;
+const maxUploadSize = 25 * 1024 * 1024;
 const allowedExtensions = ["jpg", "jpeg", "png", "pdf", "txt", "log"];
 
 const transitions: Record<TicketStatus, TicketStatus[]> = {
-  New: ["In Progress", "Closed"],
-  "In Progress": ["Resolved", "Closed"],
+  New: ["In Progress", "Pending", "Closed"],
+  "In Progress": ["Pending", "Waiting for Customer", "On Hold", "Resolved", "Closed"],
+  Pending: ["In Progress", "Waiting for Customer", "On Hold", "Closed"],
+  "Waiting for Customer": ["In Progress", "On Hold", "Closed"],
+  "On Hold": ["In Progress", "Pending", "Closed"],
   Resolved: ["Closed"],
   Closed: ["Reopened"],
-  Reopened: ["In Progress", "Closed"],
+  Reopened: ["In Progress", "Pending", "Closed"],
 };
 
 const roleTargets: Record<User["role"], TicketStatus[]> = {
   client: ["Closed", "Reopened"],
-  operator: ["In Progress", "Resolved", "Closed", "Reopened"],
-  engineer: ["In Progress", "Resolved"],
-  admin: ["In Progress", "Resolved", "Closed", "Reopened"],
+  operator: [
+    "In Progress",
+    "Pending",
+    "Waiting for Customer",
+    "On Hold",
+    "Resolved",
+    "Closed",
+    "Reopened",
+  ],
+  engineer: ["In Progress", "Pending", "Waiting for Customer", "On Hold", "Resolved"],
+  admin: [
+    "In Progress",
+    "Pending",
+    "Waiting for Customer",
+    "On Hold",
+    "Resolved",
+    "Closed",
+    "Reopened",
+  ],
 };
 
 function formatDate(value: string | null): string {
@@ -52,33 +71,64 @@ function formatFileSize(size: number): string {
   return `${(size / 1024 / 1024).toFixed(2)} МБ`;
 }
 
-function getSlaLimitHours(ticket: Ticket): number {
-  switch (ticket.priority) {
-    case "High":
-      return 8;
-    case "Medium":
-      return 24;
-    case "Low":
-      return 72;
+function formatDuration(seconds: number): string {
+  const hours = seconds / 3600;
+  if (hours < 1) {
+    return `${Math.round(seconds / 60)} хв`;
+  }
+  return `${hours.toFixed(1)} год`;
+}
+
+function statusClass(status: TicketStatus): string {
+  switch (status) {
+    case "New":
+      return "border-blue-200 bg-blue-50 text-blue-700";
+    case "In Progress":
+      return "border-cyan-200 bg-cyan-50 text-primary";
+    case "Pending":
+      return "border-amber-200 bg-amber-50 text-warning";
+    case "Waiting for Customer":
+      return "border-violet-200 bg-violet-50 text-violet-700";
+    case "On Hold":
+      return "border-slate-200 bg-slate-100 text-slate-700";
+    case "Resolved":
+      return "border-green-200 bg-green-50 text-success";
+    case "Closed":
+      return "border-slate-200 bg-slate-100 text-slate-700";
+    case "Reopened":
+      return "border-orange-200 bg-orange-50 text-orange-700";
+  }
+}
+
+function slaClass(status: SlaStatus): string {
+  switch (status) {
+    case "Within SLA":
+    case "Met":
+      return "border-green-200 bg-green-50 text-success";
+    case "Paused":
+      return "border-amber-200 bg-amber-50 text-warning";
+    case "Breached":
+      return "border-red-200 bg-red-50 text-danger";
+  }
+}
+
+function slaLabel(status: SlaStatus): string {
+  switch (status) {
+    case "Within SLA":
+      return "SLA в нормі";
+    case "Paused":
+      return "SLA на паузі";
+    case "Met":
+      return "SLA виконано";
+    case "Breached":
+      return "SLA порушено";
   }
 }
 
 function getSlaText(ticket: Ticket): { label: string; className: string } {
-  const createdAt = new Date(ticket.created_at).getTime();
-  const endAt = ticket.resolved_at ? new Date(ticket.resolved_at).getTime() : Date.now();
-  const elapsedHours = Math.max(0, (endAt - createdAt) / 36e5);
-  const limit = getSlaLimitHours(ticket);
-
-  if (elapsedHours <= limit) {
-    return {
-      label: `SLA в нормі: ${elapsedHours.toFixed(1)} год / ${limit} год`,
-      className: "border-green-200 bg-green-50 text-success",
-    };
-  }
-
   return {
-    label: `SLA порушено: ${elapsedHours.toFixed(1)} год / ${limit} год`,
-    className: "border-red-200 bg-red-50 text-danger",
+    label: `${slaLabel(ticket.sla_status)}: ${formatDuration(ticket.active_duration_seconds)} / ${formatDuration(ticket.sla_limit_seconds)}`,
+    className: slaClass(ticket.sla_status),
   };
 }
 
@@ -172,7 +222,7 @@ export default function TicketDetailsPage() {
       return;
     }
     if (file.size > maxUploadSize) {
-      setFileError("Розмір файлу не повинен перевищувати 5 МБ.");
+      setFileError("Розмір файлу не повинен перевищувати 25 МБ.");
       return;
     }
 
@@ -237,7 +287,9 @@ export default function TicketDetailsPage() {
                     {ticket.description}
                   </p>
                 </div>
-                <span className="inline-flex w-fit rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-sm font-medium text-primary">
+                <span
+                  className={`inline-flex w-fit rounded-full border px-3 py-1 text-sm font-medium ${statusClass(ticket.status)}`}
+                >
                   {ticket.status}
                 </span>
               </div>
@@ -266,6 +318,22 @@ export default function TicketDetailsPage() {
                   </dd>
                 </div>
               </dl>
+
+              {ticket.status_history && ticket.status_history.length > 0 ? (
+                <section className="mt-6 border-t border-border pt-5">
+                  <h3 className="mb-3 text-base font-semibold text-text">Історія статусів</h3>
+                  <ul className="space-y-2 text-sm">
+                    {ticket.status_history.map((item) => (
+                      <li className="rounded-md border border-border px-3 py-2" key={item.id}>
+                        <span className="font-medium text-text">
+                          {item.from_status ?? "Створено"} {"->"} {item.to_status}
+                        </span>
+                        <span className="ml-2 text-muted">{formatDate(item.changed_at)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
             </section>
 
             <aside className="space-y-5">
@@ -286,7 +354,9 @@ export default function TicketDetailsPage() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-sm text-muted">Для поточної ролі немає доступних переходів.</p>
+                  <p className="text-sm text-muted">
+                    Для поточної ролі немає доступних переходів.
+                  </p>
                 )}
               </section>
 
