@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { login } from "@/lib/api";
@@ -33,7 +34,9 @@ export default function LoginPage() {
     <main className="flex min-h-screen items-center justify-center px-4 py-10">
       <section className="w-full max-w-[420px] rounded-lg border border-border bg-white p-6 shadow-sm">
         <div className="mb-6">
-          <p className="text-sm font-medium text-primary">TicketFlow</p>
+          <Link className="text-sm font-medium text-primary" href="/">
+            TicketFlow
+          </Link>
           <h1 className="mt-2 text-2xl font-semibold text-text">Вхід до системи</h1>
         </div>
 
@@ -76,6 +79,13 @@ export default function LoginPage() {
             {isLoading ? "Вхід..." : "Увійти"}
           </button>
         </form>
+
+        <p className="mt-5 text-center text-sm text-muted">
+          Потрібно створити організацію?{" "}
+          <Link className="font-medium text-primary" href="/register">
+            Зареєструватися
+          </Link>
+        </p>
       </section>
     </main>
   );

@@ -67,6 +67,14 @@ export interface AuthResponse {
   user: User;
 }
 
+export interface RegisterOrganizationInput {
+  organization_name: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  password: string;
+}
+
 export interface ListResponse<T> {
   data: T[];
   total: number;

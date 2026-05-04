@@ -19,10 +19,12 @@ func main() {
 	database := database.InitDB(cfg)
 
 	userRepo := repository.NewUserRepository(database)
+	organizationRepo := repository.NewOrganizationRepository(database)
 	ticketRepo := repository.NewTicketRepository(database)
 
 	authHandler := handlers.NewAuthHandler(
 		userRepo,
+		organizationRepo,
 		cfg.JWTSecret,
 		cfg.JWTTTL,
 	)

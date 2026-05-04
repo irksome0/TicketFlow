@@ -3,11 +3,13 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
@@ -17,21 +19,24 @@ import (
 
 // AuthHandler містить залежності обробника автентифікації.
 type AuthHandler struct {
-	userRepo  repository.UserRepository
-	jwtSecret string
-	jwtTTL    time.Duration
+	userRepo         repository.UserRepository
+	organizationRepo repository.OrganizationRepository
+	jwtSecret        string
+	jwtTTL           time.Duration
 }
 
 // NewAuthHandler створює новий екземпляр AuthHandler.
 func NewAuthHandler(
 	userRepo repository.UserRepository,
+	organizationRepo repository.OrganizationRepository,
 	jwtSecret string,
 	jwtTTL time.Duration,
 ) *AuthHandler {
 	return &AuthHandler{
-		userRepo:  userRepo,
-		jwtSecret: jwtSecret,
-		jwtTTL:    jwtTTL,
+		userRepo:         userRepo,
+		organizationRepo: organizationRepo,
+		jwtSecret:        jwtSecret,
+		jwtTTL:           jwtTTL,
 	}
 }
 
@@ -43,6 +48,14 @@ type registerRequest struct {
 	FirstName      string `json:"first_name"      binding:"required"`
 	LastName       string `json:"last_name"       binding:"required"`
 	OrganizationID string `json:"organization_id" binding:"required,uuid"`
+}
+
+type registerOrganizationRequest struct {
+	OrganizationName string `json:"organization_name" binding:"required"`
+	Email            string `json:"email"             binding:"required,email"`
+	Password         string `json:"password"          binding:"required,min=8"`
+	FirstName        string `json:"first_name"        binding:"required"`
+	LastName         string `json:"last_name"         binding:"required"`
 }
 
 type loginRequest struct {
@@ -117,7 +130,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 
 	if err := h.userRepo.Create(user); err != nil {
-		if errors.Is(err, gorm.ErrDuplicatedKey) {
+		if isDuplicateKeyError(err) {
 			c.JSON(http.StatusConflict, gin.H{
 				"error": "користувач із таким email вже існує",
 			})
@@ -140,6 +153,79 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	c.JSON(http.StatusCreated, authResponse{
 		Token: token,
 		User:  toUserPayload(user),
+	})
+}
+
+// RegisterOrganization — POST /api/v1/auth/register-organization
+// Створює нову клієнтську організацію та першого адміністратора цієї організації.
+func (h *AuthHandler) RegisterOrganization(c *gin.Context) {
+	var req registerOrganizationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	organizationName := strings.TrimSpace(req.OrganizationName)
+	firstName := strings.TrimSpace(req.FirstName)
+	lastName := strings.TrimSpace(req.LastName)
+	email := strings.TrimSpace(req.Email)
+
+	if organizationName == "" || firstName == "" || lastName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "назва організації, ім'я та прізвище є обов'язковими",
+		})
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword(
+		[]byte(req.Password),
+		bcrypt.DefaultCost,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "помилка хешування пароля",
+		})
+		return
+	}
+
+	organization := &models.Organization{
+		ID:   uuid.New(),
+		Name: organizationName,
+	}
+	admin := &models.User{
+		ID:           uuid.New(),
+		Email:        email,
+		PasswordHash: string(hash),
+		Role:         models.RoleAdmin,
+		TokenVersion: 1,
+		FirstName:    firstName,
+		LastName:     lastName,
+	}
+
+	if err := h.organizationRepo.CreateWithAdmin(organization, admin); err != nil {
+		if isDuplicateKeyError(err) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "організація або користувач з такими даними вже існує",
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "помилка створення організації",
+		})
+		return
+	}
+
+	token, err := h.generateToken(admin)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "помилка генерації токена",
+		})
+		return
+	}
+
+	c.JSON(http.StatusCreated, authResponse{
+		Token: token,
+		User:  toUserPayload(admin),
 	})
 }
 
@@ -213,4 +299,13 @@ func toUserPayload(u *models.User) userPayload {
 		Role:           u.Role,
 		OrganizationID: u.OrganizationID,
 	}
+}
+
+func isDuplicateKeyError(err error) bool {
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
