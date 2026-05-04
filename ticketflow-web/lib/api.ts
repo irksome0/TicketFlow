@@ -5,6 +5,7 @@ import type {
   Attachment,
   AuthResponse,
   ListResponse,
+  RegisterOrganizationInput,
   Role,
   Ticket,
   TicketPriority,
@@ -64,6 +65,15 @@ export function login(email: string, password: string): Promise<AuthResponse> {
   return request<AuthResponse>("/auth/login", {
     method: "POST",
     body: { email, password },
+  });
+}
+
+export function registerOrganization(
+  input: RegisterOrganizationInput,
+): Promise<AuthResponse> {
+  return request<AuthResponse>("/auth/register-organization", {
+    method: "POST",
+    body: input,
   });
 }
 

@@ -34,6 +34,7 @@ func Setup(
 	public := r.Group("/api/v1")
 	{
 		public.POST("/auth/register", authHandler.Register)
+		public.POST("/auth/register-organization", authHandler.RegisterOrganization)
 		public.POST("/auth/login", authHandler.Login)
 	}
 
