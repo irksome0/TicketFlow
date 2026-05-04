@@ -7,7 +7,16 @@ import { getTickets } from "@/lib/api";
 import { clearAuth, getStoredUser, getToken } from "@/lib/auth";
 import type { Ticket, TicketPriority, TicketStatus, User } from "@/lib/types";
 
-const statuses: TicketStatus[] = ["New", "In Progress", "Resolved", "Closed", "Reopened"];
+const statuses: TicketStatus[] = [
+  "New",
+  "In Progress",
+  "Pending",
+  "Waiting for Customer",
+  "On Hold",
+  "Resolved",
+  "Closed",
+  "Reopened",
+];
 const priorities: TicketPriority[] = ["High", "Medium", "Low"];
 
 function statusClass(status: TicketStatus): string {
@@ -16,12 +25,18 @@ function statusClass(status: TicketStatus): string {
       return "border-blue-200 bg-blue-50 text-blue-700";
     case "In Progress":
       return "border-cyan-200 bg-cyan-50 text-primary";
+    case "Pending":
+      return "border-amber-200 bg-amber-50 text-warning";
+    case "Waiting for Customer":
+      return "border-violet-200 bg-violet-50 text-violet-700";
+    case "On Hold":
+      return "border-slate-200 bg-slate-100 text-slate-700";
     case "Resolved":
       return "border-green-200 bg-green-50 text-success";
     case "Closed":
       return "border-slate-200 bg-slate-100 text-slate-700";
     case "Reopened":
-      return "border-amber-200 bg-amber-50 text-warning";
+      return "border-orange-200 bg-orange-50 text-orange-700";
   }
 }
 
@@ -207,19 +222,20 @@ export default function TicketsPage() {
                   <th className="px-4 py-3 font-semibold">Назва</th>
                   <th className="px-4 py-3 font-semibold">Статус</th>
                   <th className="px-4 py-3 font-semibold">Пріоритет</th>
+                  <th className="px-4 py-3 font-semibold">SLA</th>
                   <th className="px-4 py-3 font-semibold">Створено</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {isLoading ? (
                   <tr>
-                    <td className="px-4 py-6 text-muted" colSpan={4}>
+                    <td className="px-4 py-6 text-muted" colSpan={5}>
                       Завантаження...
                     </td>
                   </tr>
                 ) : tickets.length === 0 ? (
                   <tr>
-                    <td className="px-4 py-6 text-muted" colSpan={4}>
+                    <td className="px-4 py-6 text-muted" colSpan={5}>
                       Заявок не знайдено.
                     </td>
                   </tr>
@@ -247,6 +263,9 @@ export default function TicketsPage() {
                         >
                           {ticket.priority}
                         </span>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-muted">
+                        {ticket.sla_status}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-muted">
                         {formatDate(ticket.created_at)}

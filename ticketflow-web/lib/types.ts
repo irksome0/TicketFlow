@@ -3,11 +3,16 @@ export type Role = "client" | "operator" | "engineer" | "admin";
 export type TicketStatus =
   | "New"
   | "In Progress"
+  | "Pending"
+  | "Waiting for Customer"
+  | "On Hold"
   | "Resolved"
   | "Closed"
   | "Reopened";
 
 export type TicketPriority = "High" | "Medium" | "Low";
+
+export type SlaStatus = "Within SLA" | "Paused" | "Met" | "Breached";
 
 export interface User {
   id: string;
@@ -32,6 +37,19 @@ export interface Ticket {
   created_at: string;
   resolved_at: string | null;
   updated_at: string;
+  sla_limit_seconds: number;
+  active_duration_seconds: number;
+  sla_status: SlaStatus;
+  status_history?: TicketStatusHistory[];
+}
+
+export interface TicketStatusHistory {
+  id: string;
+  ticket_id: string;
+  from_status: TicketStatus | null;
+  to_status: TicketStatus;
+  changed_by_id: string;
+  changed_at: string;
 }
 
 export interface Attachment {
