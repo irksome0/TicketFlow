@@ -36,6 +36,8 @@ func Setup(
 		public.POST("/auth/register", authHandler.Register)
 		public.POST("/auth/register-organization", authHandler.RegisterOrganization)
 		public.POST("/auth/login", authHandler.Login)
+		public.GET("/users/invites/:token", userHandler.GetInvite)
+		public.POST("/users/invites/:token/accept", userHandler.AcceptInvite)
 	}
 
 	protected := r.Group("/api/v1")
@@ -57,6 +59,7 @@ func Setup(
 		users.Use(middleware.RequireRole(models.RoleAdmin))
 		{
 			users.GET("", userHandler.GetAll)
+			users.POST("/invites", userHandler.CreateInvite)
 			users.PATCH("/:id/role", userHandler.UpdateRole)
 		}
 	}

@@ -19,6 +19,7 @@ func main() {
 	database := database.InitDB(cfg)
 
 	userRepo := repository.NewUserRepository(database)
+	inviteRepo := repository.NewInviteRepository(database)
 	organizationRepo := repository.NewOrganizationRepository(database)
 	ticketRepo := repository.NewTicketRepository(database)
 
@@ -29,7 +30,7 @@ func main() {
 		cfg.JWTTTL,
 	)
 	ticketHandler := handlers.NewTicketHandler(ticketRepo)
-	userHandler := handlers.NewUserHandler(userRepo)
+	userHandler := handlers.NewUserHandler(userRepo, inviteRepo, cfg.FrontendOrigin)
 	attachmentHandler := handlers.NewAttachmentHandler(database)
 
 	r := router.Setup(
