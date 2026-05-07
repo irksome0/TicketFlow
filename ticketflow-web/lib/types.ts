@@ -75,6 +75,33 @@ export interface RegisterOrganizationInput {
   password: string;
 }
 
+export interface CreateInviteInput {
+  email: string;
+  role: Role;
+}
+
+export interface Invite {
+  id: string;
+  email: string;
+  role: Role;
+  invite_url?: string;
+  expires_at: string;
+  used_at?: string | null;
+  created_at?: string;
+}
+
+export interface PublicInvite {
+  email: string;
+  role: Role;
+  expires_at: string;
+}
+
+export interface AcceptInviteInput {
+  first_name: string;
+  last_name: string;
+  password: string;
+}
+
 export interface ListResponse<T> {
   data: T[];
   total: number;

@@ -38,6 +38,7 @@ func InitDB(cfg *config.Config) *gorm.DB {
 	if err := database.AutoMigrate(
 		&models.Organization{},
 		&models.User{},
+		&models.OrganizationInvite{},
 		&models.Ticket{},
 		&models.TicketStatusHistory{},
 		&models.Attachment{},

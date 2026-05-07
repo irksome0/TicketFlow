@@ -62,6 +62,23 @@ type User struct {
 	UpdatedAt      time.Time
 }
 
+// OrganizationInvite представляє одноразове запрошення користувача до організації.
+type OrganizationInvite struct {
+	ID             uuid.UUID  `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
+	OrganizationID uuid.UUID  `gorm:"type:uuid;not null;index"`
+	Email          string     `gorm:"type:varchar(255);not null;index"`
+	Role           Role       `gorm:"type:user_role;not null"`
+	TokenHash      string     `gorm:"type:varchar(64);unique;not null"`
+	ExpiresAt      time.Time  `gorm:"not null;index"`
+	UsedAt         *time.Time `gorm:"index"`
+	CreatedBy      uuid.UUID  `gorm:"type:uuid;not null"`
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+
+	Organization Organization `gorm:"foreignKey:OrganizationID"`
+	Creator      User         `gorm:"foreignKey:CreatedBy"`
+}
+
 // Ticket представляє заявку клієнта із ключовими полями для SLA
 type Ticket struct {
 	ID             uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`

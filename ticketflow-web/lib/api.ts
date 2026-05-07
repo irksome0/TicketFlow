@@ -3,8 +3,12 @@
 import { clearAuth, getToken } from "./auth";
 import type {
   Attachment,
+  AcceptInviteInput,
   AuthResponse,
+  CreateInviteInput,
+  Invite,
   ListResponse,
+  PublicInvite,
   RegisterOrganizationInput,
   Role,
   Ticket,
@@ -182,5 +186,26 @@ export function updateUserRole(id: string, role: Role): Promise<User> {
   return request<User>(`/users/${id}/role`, {
     method: "PATCH",
     body: { role },
+  });
+}
+
+export function createInvite(input: CreateInviteInput): Promise<Invite> {
+  return request<Invite>("/users/invites", {
+    method: "POST",
+    body: input,
+  });
+}
+
+export function getInvite(token: string): Promise<PublicInvite> {
+  return request<PublicInvite>(`/users/invites/${token}`);
+}
+
+export function acceptInvite(
+  token: string,
+  input: AcceptInviteInput,
+): Promise<User> {
+  return request<User>(`/users/invites/${token}/accept`, {
+    method: "POST",
+    body: input,
   });
 }
