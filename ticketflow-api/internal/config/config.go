@@ -29,6 +29,14 @@ type Config struct {
 	FrontendOrigin string
 
 	AttachmentScanEnabled bool
+
+	StorageProvider   string
+	LocalStorageDir   string
+	R2AccountID       string
+	R2Endpoint        string
+	R2AccessKeyID     string
+	R2SecretAccessKey string
+	R2Bucket          string
 }
 
 func Load() *Config {
@@ -54,6 +62,14 @@ func Load() *Config {
 		FrontendOrigin: normalizeOrigin(getEnv("FRONTEND_ORIGIN", "http://localhost:3000")),
 
 		AttachmentScanEnabled: getEnvAsBool("ATTACHMENT_SCAN_ENABLED", true),
+
+		StorageProvider:   strings.ToLower(strings.TrimSpace(getEnv("STORAGE_PROVIDER", "local"))),
+		LocalStorageDir:   getEnv("LOCAL_STORAGE_DIR", "uploads"),
+		R2AccountID:       strings.TrimSpace(getEnv("R2_ACCOUNT_ID", "")),
+		R2Endpoint:        strings.TrimSpace(getEnv("R2_ENDPOINT", "")),
+		R2AccessKeyID:     strings.TrimSpace(getEnv("R2_ACCESS_KEY_ID", "")),
+		R2SecretAccessKey: strings.TrimSpace(getEnv("R2_SECRET_ACCESS_KEY", "")),
+		R2Bucket:          strings.TrimSpace(getEnv("R2_BUCKET", "")),
 	}
 }
 

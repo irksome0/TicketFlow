@@ -3,6 +3,8 @@ package handlers
 import (
 	"errors"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,6 +18,7 @@ import (
 	"ticketflow-api/internal/models"
 	"ticketflow-api/internal/repository"
 	"ticketflow-api/internal/security"
+	"ticketflow-api/internal/storage"
 )
 
 // ── Константи та допоміжні дані ───────────────────────────────────────────────
@@ -23,9 +26,6 @@ import (
 const (
 	// maxUploadSize визначає максимально допустимий розмір вкладення (25 МБ).
 	maxUploadSize = 25 << 20
-
-	// uploadBasePath — кореневий каталог зберігання файлів.
-	uploadBasePath = "uploads"
 )
 
 // allowedExtensions містить перелік дозволених розширень файлів.
@@ -81,10 +81,12 @@ type AttachmentHandler struct {
 	ticketRepo     repository.TicketRepository
 	attachmentRepo repository.AttachmentRepository
 	scanner        security.AttachmentScanner
+	storage        storage.FileStorage
+	storagePrefix  string
 }
 
 // NewAttachmentHandler створює новий екземпляр AttachmentHandler.
-func NewAttachmentHandler(db *gorm.DB, scanner security.AttachmentScanner) *AttachmentHandler {
+func NewAttachmentHandler(db *gorm.DB, scanner security.AttachmentScanner, fileStorage storage.FileStorage, storagePrefix string) *AttachmentHandler {
 	if scanner == nil {
 		scanner = security.NoopAttachmentScanner{}
 	}
@@ -92,6 +94,8 @@ func NewAttachmentHandler(db *gorm.DB, scanner security.AttachmentScanner) *Atta
 		ticketRepo:     repository.NewTicketRepository(db),
 		attachmentRepo: repository.NewAttachmentRepository(db),
 		scanner:        scanner,
+		storage:        fileStorage,
+		storagePrefix:  storagePrefix,
 	}
 }
 
@@ -170,39 +174,49 @@ func (h *AttachmentHandler) Upload(c *gin.Context) {
 
 	contentType := extToContentType[ext]
 
-	// Формування унікального шляху для збереження файлу:
-	// uploads/{orgID}/{ticketID}/{uuid}_{originalFileName}
-	uploadDir := filepath.Join(
-		uploadBasePath,
-		orgID.String(),
-		ticketID.String(),
-	)
-
-	if err := os.MkdirAll(uploadDir, 0755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Помилка створення каталогу для збереження файлу",
-		})
-		return
-	}
-
 	originalFileName := filepath.Base(fileHeader.Filename)
 	uniqueFileName := fmt.Sprintf(
 		"%s_%s",
 		uuid.New().String(),
 		originalFileName,
 	)
-	filePath := filepath.Join(uploadDir, uniqueFileName)
+	storageKey := h.buildStorageKey(orgID, ticketID, uniqueFileName)
 
-	// Збереження файлу на диск
-	if err := c.SaveUploadedFile(fileHeader, filePath); err != nil {
+	tempFile, err := os.CreateTemp("", "ticketflow-attachment-*"+ext)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Помилка збереження файлу",
+			"error": "помилка підготовки тимчасового файлу",
+		})
+		return
+	}
+	tempPath := tempFile.Name()
+	defer os.Remove(tempPath)
+
+	src, err := fileHeader.Open()
+	if err != nil {
+		_ = tempFile.Close()
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "помилка відкриття вкладення",
+		})
+		return
+	}
+	if _, err := io.Copy(tempFile, src); err != nil {
+		_ = src.Close()
+		_ = tempFile.Close()
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "помилка збереження тимчасового файлу",
+		})
+		return
+	}
+	_ = src.Close()
+	if err := tempFile.Close(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "помилка завершення запису тимчасового файлу",
 		})
 		return
 	}
 
-	if err := h.scanner.ScanFile(filePath); err != nil {
-		_ = os.Remove(filePath)
+	if err := h.scanner.ScanFile(tempPath); err != nil {
 		if errors.Is(err, security.ErrMaliciousAttachment) {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": "файл не пройшов антивірусну перевірку",
@@ -215,19 +229,34 @@ func (h *AttachmentHandler) Upload(c *gin.Context) {
 		return
 	}
 
+	fileForStorage, err := os.Open(tempPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "помилка відкриття перевіреного файлу",
+		})
+		return
+	}
+	defer fileForStorage.Close()
+
+	if err := h.storage.Save(c.Request.Context(), storageKey, fileForStorage, contentType); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "помилка збереження файлу у сховищі",
+		})
+		return
+	}
+
 	// Збереження метаданих вкладення у базі даних
 	attachment := &models.Attachment{
 		TicketID:    ticketID,
 		UploaderID:  userID,
 		FileName:    originalFileName,
-		FilePath:    filePath,
+		FilePath:    storageKey,
 		FileSize:    int(fileHeader.Size),
 		ContentType: contentType,
 	}
 
 	if err := h.attachmentRepo.Create(attachment); err != nil {
-		// У разі помилки БД — видаляємо вже збережений файл
-		_ = os.Remove(filePath)
+		_ = h.storage.Delete(c.Request.Context(), storageKey)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Помилка збереження метаданих вкладення",
 		})
@@ -367,23 +396,34 @@ func (h *AttachmentHandler) Download(c *gin.Context) {
 		return
 	}
 
-	filePath := attachment.FilePath
-
-	// Перевіряємо фізичну наявність файлу у файловій системі
-	fileInfo, err := os.Stat(filePath)
+	file, err := h.storage.Open(c.Request.Context(), attachment.FilePath)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "файл не знайдено на сервері",
+			"error": "файл не знайдено у сховищі",
 		})
 		return
 	}
-	if fileInfo.IsDir() {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "шлях вкладення не є файлом",
-		})
-		return
-	}
+	defer file.Close()
 
-	// Надсилаємо файл клієнту як вкладення з оригінальним іменем
-	c.FileAttachment(filePath, attachment.FileName)
+	c.Header("Content-Type", attachment.ContentType)
+	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{
+		"filename": attachment.FileName,
+	}))
+	c.Header("Content-Length", fmt.Sprintf("%d", attachment.FileSize))
+	if _, err := io.Copy(c.Writer, file); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "помилка передачі файлу"})
+		return
+	}
+}
+
+func (h *AttachmentHandler) buildStorageKey(orgID, ticketID uuid.UUID, fileName string) string {
+	parts := []string{
+		orgID.String(),
+		ticketID.String(),
+		fileName,
+	}
+	if h.storagePrefix != "" {
+		parts = append([]string{h.storagePrefix}, parts...)
+	}
+	return strings.Join(parts, "/")
 }
