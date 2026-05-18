@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -14,6 +15,7 @@ import (
 
 	"ticketflow-api/internal/models"
 	"ticketflow-api/internal/repository"
+	"ticketflow-api/internal/security"
 )
 
 // ── Константи та допоміжні дані ───────────────────────────────────────────────
@@ -78,13 +80,18 @@ func toAttachmentResponse(a models.Attachment) AttachmentResponse {
 type AttachmentHandler struct {
 	ticketRepo     repository.TicketRepository
 	attachmentRepo repository.AttachmentRepository
+	scanner        security.AttachmentScanner
 }
 
 // NewAttachmentHandler створює новий екземпляр AttachmentHandler.
-func NewAttachmentHandler(db *gorm.DB) *AttachmentHandler {
+func NewAttachmentHandler(db *gorm.DB, scanner security.AttachmentScanner) *AttachmentHandler {
+	if scanner == nil {
+		scanner = security.NoopAttachmentScanner{}
+	}
 	return &AttachmentHandler{
 		ticketRepo:     repository.NewTicketRepository(db),
 		attachmentRepo: repository.NewAttachmentRepository(db),
+		scanner:        scanner,
 	}
 }
 
@@ -190,6 +197,20 @@ func (h *AttachmentHandler) Upload(c *gin.Context) {
 	if err := c.SaveUploadedFile(fileHeader, filePath); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Помилка збереження файлу",
+		})
+		return
+	}
+
+	if err := h.scanner.ScanFile(filePath); err != nil {
+		_ = os.Remove(filePath)
+		if errors.Is(err, security.ErrMaliciousAttachment) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "файл не пройшов антивірусну перевірку",
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "помилка антивірусної перевірки",
 		})
 		return
 	}
