@@ -47,6 +47,10 @@ func InitDB(cfg *config.Config) *gorm.DB {
 		log.Fatalf("Помилка міграції бази даних: %v", err)
 	}
 
+	if cfg.DBRLS {
+		configureTenantRLS(database)
+	}
+
 	log.Println("Підключення до бази даних встановлено успішно")
 	return database
 }
@@ -108,4 +112,120 @@ func ensureEnumValues(database *gorm.DB, name string, values []string) {
 			log.Printf("Не вдалося оновити enum %s значенням %q: %v", name, value, err)
 		}
 	}
+}
+
+func configureTenantRLS(database *gorm.DB) {
+	functions := []string{
+		`CREATE OR REPLACE FUNCTION ticketflow_current_organization_id()
+			RETURNS uuid
+			LANGUAGE sql
+			STABLE
+			AS $$
+				SELECT NULLIF(current_setting('ticketflow.organization_id', true), '')::uuid
+			$$`,
+		`CREATE OR REPLACE FUNCTION ticketflow_rls_bypass()
+			RETURNS boolean
+			LANGUAGE sql
+			STABLE
+			AS $$
+				SELECT COALESCE(current_setting('ticketflow.rls_bypass', true), '') = 'on'
+			$$`,
+	}
+
+	statements := []string{
+		`ALTER TABLE organizations ENABLE ROW LEVEL SECURITY`,
+		`ALTER TABLE users ENABLE ROW LEVEL SECURITY`,
+		`ALTER TABLE organization_invites ENABLE ROW LEVEL SECURITY`,
+		`ALTER TABLE tickets ENABLE ROW LEVEL SECURITY`,
+		`ALTER TABLE attachments ENABLE ROW LEVEL SECURITY`,
+		`ALTER TABLE ticket_comments ENABLE ROW LEVEL SECURITY`,
+		`ALTER TABLE ticket_status_histories ENABLE ROW LEVEL SECURITY`,
+
+		dropPolicySQL("organizations", "tenant_organizations_isolation"),
+		dropPolicySQL("users", "tenant_users_isolation"),
+		dropPolicySQL("organization_invites", "tenant_invites_isolation"),
+		dropPolicySQL("tickets", "tenant_tickets_isolation"),
+		dropPolicySQL("attachments", "tenant_attachments_isolation"),
+		dropPolicySQL("ticket_comments", "tenant_comments_isolation"),
+		dropPolicySQL("ticket_status_histories", "tenant_status_history_isolation"),
+
+		`CREATE POLICY tenant_organizations_isolation ON organizations
+			USING (ticketflow_rls_bypass() OR id = ticketflow_current_organization_id())
+			WITH CHECK (ticketflow_rls_bypass() OR id = ticketflow_current_organization_id())`,
+		`CREATE POLICY tenant_users_isolation ON users
+			USING (ticketflow_rls_bypass() OR organization_id = ticketflow_current_organization_id())
+			WITH CHECK (ticketflow_rls_bypass() OR organization_id = ticketflow_current_organization_id())`,
+		`CREATE POLICY tenant_invites_isolation ON organization_invites
+			USING (ticketflow_rls_bypass() OR organization_id = ticketflow_current_organization_id())
+			WITH CHECK (ticketflow_rls_bypass() OR organization_id = ticketflow_current_organization_id())`,
+		`CREATE POLICY tenant_tickets_isolation ON tickets
+			USING (ticketflow_rls_bypass() OR organization_id = ticketflow_current_organization_id())
+			WITH CHECK (ticketflow_rls_bypass() OR organization_id = ticketflow_current_organization_id())`,
+		`CREATE POLICY tenant_attachments_isolation ON attachments
+			USING (
+				ticketflow_rls_bypass()
+				OR EXISTS (
+					SELECT 1 FROM tickets
+					WHERE tickets.id = attachments.ticket_id
+					AND tickets.organization_id = ticketflow_current_organization_id()
+				)
+			)
+			WITH CHECK (
+				ticketflow_rls_bypass()
+				OR EXISTS (
+					SELECT 1 FROM tickets
+					WHERE tickets.id = attachments.ticket_id
+					AND tickets.organization_id = ticketflow_current_organization_id()
+				)
+			)`,
+		`CREATE POLICY tenant_comments_isolation ON ticket_comments
+			USING (
+				ticketflow_rls_bypass()
+				OR EXISTS (
+					SELECT 1 FROM tickets
+					WHERE tickets.id = ticket_comments.ticket_id
+					AND tickets.organization_id = ticketflow_current_organization_id()
+				)
+			)
+			WITH CHECK (
+				ticketflow_rls_bypass()
+				OR EXISTS (
+					SELECT 1 FROM tickets
+					WHERE tickets.id = ticket_comments.ticket_id
+					AND tickets.organization_id = ticketflow_current_organization_id()
+				)
+			)`,
+		`CREATE POLICY tenant_status_history_isolation ON ticket_status_histories
+			USING (
+				ticketflow_rls_bypass()
+				OR EXISTS (
+					SELECT 1 FROM tickets
+					WHERE tickets.id = ticket_status_histories.ticket_id
+					AND tickets.organization_id = ticketflow_current_organization_id()
+				)
+			)
+			WITH CHECK (
+				ticketflow_rls_bypass()
+				OR EXISTS (
+					SELECT 1 FROM tickets
+					WHERE tickets.id = ticket_status_histories.ticket_id
+					AND tickets.organization_id = ticketflow_current_organization_id()
+				)
+			)`,
+	}
+
+	for _, statement := range functions {
+		if err := database.Exec(statement).Error; err != nil {
+			log.Fatalf("Помилка створення RLS-функції: %v", err)
+		}
+	}
+	for _, statement := range statements {
+		if err := database.Exec(statement).Error; err != nil {
+			log.Fatalf("Помилка налаштування RLS: %v", err)
+		}
+	}
+}
+
+func dropPolicySQL(tableName, policyName string) string {
+	return fmt.Sprintf("DROP POLICY IF EXISTS %s ON %s", policyName, tableName)
 }

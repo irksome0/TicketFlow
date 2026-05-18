@@ -19,6 +19,7 @@ type Config struct {
 	DBName     string
 	DBSSLMode  string
 	DBTimeZone string
+	DBRLS      bool
 
 	JWTSecret string
 	JWTTTL    time.Duration
@@ -26,6 +27,8 @@ type Config struct {
 	ServerPort     string
 	GinMode        string
 	FrontendOrigin string
+
+	AttachmentScanEnabled bool
 }
 
 func Load() *Config {
@@ -41,6 +44,7 @@ func Load() *Config {
 		DBName:     getEnv("DB_NAME", "ticketflow"),
 		DBSSLMode:  getEnv("DB_SSLMODE", "disable"),
 		DBTimeZone: getEnv("DB_TIMEZONE", "UTC"),
+		DBRLS:      getEnvAsBool("DB_RLS_ENABLED", true),
 
 		JWTSecret: getEnv("JWT_SECRET", "change-me-in-production"),
 		JWTTTL:    time.Duration(getEnvAsInt("JWT_TTL_HOURS", 24)) * time.Hour,
@@ -48,6 +52,8 @@ func Load() *Config {
 		ServerPort:     getEnv("SERVER_PORT", "8080"),
 		GinMode:        getEnv("GIN_MODE", "debug"),
 		FrontendOrigin: normalizeOrigin(getEnv("FRONTEND_ORIGIN", "http://localhost:3000")),
+
+		AttachmentScanEnabled: getEnvAsBool("ATTACHMENT_SCAN_ENABLED", true),
 	}
 }
 
@@ -71,6 +77,23 @@ func getEnvAsInt(key string, fallback int) int {
 	}
 
 	return value
+}
+
+func getEnvAsBool(key string, fallback bool) bool {
+	raw := strings.TrimSpace(strings.ToLower(getEnv(key, "")))
+	if raw == "" {
+		return fallback
+	}
+
+	switch raw {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		log.Printf("РќРµРєРѕСЂРµРєС‚РЅРµ Р·РЅР°С‡РµРЅРЅСЏ %s=%q, РІРёРєРѕСЂРёСЃС‚Р°РЅРѕ %t", key, raw, fallback)
+		return fallback
+	}
 }
 
 func normalizeOrigin(origin string) string {

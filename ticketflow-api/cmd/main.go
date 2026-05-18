@@ -10,6 +10,7 @@ import (
 	"ticketflow-api/internal/handlers"
 	"ticketflow-api/internal/repository"
 	"ticketflow-api/internal/router"
+	"ticketflow-api/internal/security"
 )
 
 func main() {
@@ -31,7 +32,11 @@ func main() {
 	)
 	ticketHandler := handlers.NewTicketHandler(ticketRepo)
 	userHandler := handlers.NewUserHandler(userRepo, inviteRepo, cfg.FrontendOrigin)
-	attachmentHandler := handlers.NewAttachmentHandler(database)
+	var attachmentScanner security.AttachmentScanner = security.NoopAttachmentScanner{}
+	if cfg.AttachmentScanEnabled {
+		attachmentScanner = security.NewSignatureAttachmentScanner()
+	}
+	attachmentHandler := handlers.NewAttachmentHandler(database, attachmentScanner)
 
 	r := router.Setup(
 		cfg.JWTSecret,
