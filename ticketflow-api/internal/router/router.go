@@ -49,6 +49,8 @@ func Setup(
 			tickets.POST("", ticketHandler.CreateTicket)
 			tickets.GET("/:id", ticketHandler.GetTicket)
 			tickets.PATCH("/:id/status", ticketHandler.UpdateTicketStatus)
+			tickets.GET("/:id/comments", ticketHandler.ListComments)
+			tickets.POST("/:id/comments", ticketHandler.CreateComment)
 
 			tickets.POST("/:id/attachments", attachmentHandler.Upload)
 			tickets.GET("/:id/attachments", attachmentHandler.GetByTicket)

@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -56,6 +57,18 @@ type statusHistoryResponse struct {
 	FromStatus *models.TicketStatus `json:"from_status"`
 	ToStatus   models.TicketStatus  `json:"to_status"`
 	CreatedAt  time.Time            `json:"created_at"`
+}
+
+type ticketCommentResponse struct {
+	ID        uuid.UUID `json:"id"`
+	TicketID  uuid.UUID `json:"ticket_id"`
+	AuthorID  uuid.UUID `json:"author_id"`
+	Message   string    `json:"message"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type createTicketCommentRequest struct {
+	Message string `json:"message" binding:"required"`
 }
 
 var validTransitions = map[models.TicketStatus][]models.TicketStatus{
@@ -333,6 +346,108 @@ func (h *TicketHandler) UpdateTicketStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, toTicketResponse(*updated))
 }
 
+func (h *TicketHandler) ListComments(c *gin.Context) {
+	ticket, ok := h.authorizedTicket(c)
+	if !ok {
+		return
+	}
+
+	comments, err := h.ticketRepo.ListComments(ticket.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "помилка отримання коментарів"})
+		return
+	}
+
+	response := make([]ticketCommentResponse, len(comments))
+	for i, comment := range comments {
+		response[i] = toTicketCommentResponse(comment)
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+func (h *TicketHandler) CreateComment(c *gin.Context) {
+	ticket, ok := h.authorizedTicket(c)
+	if !ok {
+		return
+	}
+
+	userID, ok := mustGetUserID(c)
+	if !ok {
+		return
+	}
+
+	var req createTicketCommentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	message := strings.TrimSpace(req.Message)
+	if message == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "коментар не може бути порожнім"})
+		return
+	}
+
+	comment := &models.TicketComment{
+		ID:       uuid.New(),
+		TicketID: ticket.ID,
+		AuthorID: userID,
+		Message:  message,
+	}
+
+	if err := h.ticketRepo.CreateComment(comment); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "помилка створення коментаря"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, toTicketCommentResponse(*comment))
+}
+
+func (h *TicketHandler) authorizedTicket(c *gin.Context) (*models.Ticket, bool) {
+	ticketID, ok := mustParseTicketID(c)
+	if !ok {
+		return nil, false
+	}
+
+	orgID, ok := mustGetOrgID(c)
+	if !ok {
+		return nil, false
+	}
+	role, ok := mustGetRole(c)
+	if !ok {
+		return nil, false
+	}
+
+	ticket, err := h.ticketRepo.FindByID(ticketID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "заявку не знайдено"})
+			return nil, false
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "помилка отримання заявки"})
+		return nil, false
+	}
+
+	if ticket.OrganizationID != orgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "доступ заборонено"})
+		return nil, false
+	}
+
+	if role == models.RoleClient {
+		userID, ok := mustGetUserID(c)
+		if !ok {
+			return nil, false
+		}
+		if ticket.CreatorID != userID {
+			c.JSON(http.StatusForbidden, gin.H{"error": "доступ заборонено"})
+			return nil, false
+		}
+	}
+
+	return ticket, true
+}
+
 func isValidTransition(from, to models.TicketStatus) bool {
 	allowed, exists := validTransitions[from]
 	if !exists {
@@ -403,6 +518,16 @@ func toTicketResponse(t models.Ticket) ticketResponse {
 		ActiveDurationSeconds: int64(active.Seconds()),
 		SlaStatus:             slaStatus(t.Status, active, limit),
 		StatusHistory:         history,
+	}
+}
+
+func toTicketCommentResponse(comment models.TicketComment) ticketCommentResponse {
+	return ticketCommentResponse{
+		ID:        comment.ID,
+		TicketID:  comment.TicketID,
+		AuthorID:  comment.AuthorID,
+		Message:   comment.Message,
+		CreatedAt: comment.CreatedAt,
 	}
 }
 

@@ -12,6 +12,7 @@ import type {
   RegisterOrganizationInput,
   Role,
   Ticket,
+  TicketComment,
   TicketPriority,
   TicketStatus,
   User,
@@ -120,6 +121,20 @@ export function updateTicketStatus(
   return request<Ticket>(`/tickets/${id}/status`, {
     method: "PATCH",
     body: { status },
+  });
+}
+
+export function getTicketComments(ticketId: string): Promise<TicketComment[]> {
+  return request<TicketComment[]>(`/tickets/${ticketId}/comments`);
+}
+
+export function createTicketComment(
+  ticketId: string,
+  message: string,
+): Promise<TicketComment> {
+  return request<TicketComment>(`/tickets/${ticketId}/comments`, {
+    method: "POST",
+    body: { message },
   });
 }
 

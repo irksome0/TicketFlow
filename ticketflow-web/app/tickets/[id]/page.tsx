@@ -1,17 +1,19 @@
 "use client";
 
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 import {
+  createTicketComment,
   downloadAttachment,
   getAttachments,
   getTicket,
+  getTicketComments,
   updateTicketStatus,
   uploadAttachment,
 } from "@/lib/api";
 import { getStoredUser, getToken } from "@/lib/auth";
-import type { Attachment, SlaStatus, Ticket, TicketStatus, User } from "@/lib/types";
+import type { Attachment, SlaStatus, Ticket, TicketComment, TicketStatus, User } from "@/lib/types";
 
 const maxUploadSize = 25 * 1024 * 1024;
 const allowedExtensions = ["jpg", "jpeg", "png", "pdf", "txt", "log"];
@@ -143,10 +145,15 @@ export default function TicketDetailsPage() {
 
   const [user, setUser] = useState<User | null>(null);
   const [ticket, setTicket] = useState<Ticket | null>(null);
+  const [comments, setComments] = useState<TicketComment[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [commentError, setCommentError] = useState<string | null>(null);
+  const [commentMessage, setCommentMessage] = useState("");
   const [fileError, setFileError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingComments, setIsLoadingComments] = useState(false);
+  const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [statusLoading, setStatusLoading] = useState<TicketStatus | null>(null);
 
@@ -179,6 +186,10 @@ export default function TicketDetailsPage() {
         const loadedTicket = await getTicket(ticketId);
         setTicket(loadedTicket);
 
+        setIsLoadingComments(true);
+        const loadedComments = await getTicketComments(ticketId);
+        setComments(loadedComments);
+
         if (authenticatedUser.role !== "admin") {
           const loadedAttachments = await getAttachments(ticketId);
           setAttachments(loadedAttachments);
@@ -186,6 +197,7 @@ export default function TicketDetailsPage() {
       } catch (err) {
         setError(err instanceof Error ? err.message : "Не вдалося отримати заявку.");
       } finally {
+        setIsLoadingComments(false);
         setIsLoading(false);
       }
     }
@@ -203,6 +215,28 @@ export default function TicketDetailsPage() {
       setError(err instanceof Error ? err.message : "Не вдалося змінити статус.");
     } finally {
       setStatusLoading(null);
+    }
+  }
+
+  async function handleCommentSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCommentError(null);
+
+    const message = commentMessage.trim();
+    if (!message) {
+      setCommentError("Введіть текст коментаря.");
+      return;
+    }
+
+    setIsSubmittingComment(true);
+    try {
+      const created = await createTicketComment(ticketId, message);
+      setComments((current) => [...current, created]);
+      setCommentMessage("");
+    } catch (err) {
+      setCommentError(err instanceof Error ? err.message : "Не вдалося додати коментар.");
+    } finally {
+      setIsSubmittingComment(false);
     }
   }
 
@@ -337,6 +371,52 @@ export default function TicketDetailsPage() {
             </section>
 
             <aside className="space-y-5">
+              <section className="rounded-lg border border-border bg-white p-5 shadow-sm">
+                <h2 className="mb-3 text-base font-semibold text-text">Коментарі</h2>
+
+                <form className="mb-4 space-y-3" onSubmit={handleCommentSubmit}>
+                  <textarea
+                    className="min-h-24 w-full resize-y rounded-md border border-border px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
+                    value={commentMessage}
+                    onChange={(event) => setCommentMessage(event.target.value)}
+                    placeholder="Додайте коментар до заявки"
+                    disabled={isSubmittingComment}
+                  />
+                  {commentError ? (
+                    <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-danger">
+                      {commentError}
+                    </p>
+                  ) : null}
+                  <button
+                    className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-white transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-65"
+                    type="submit"
+                    disabled={isSubmittingComment}
+                  >
+                    {isSubmittingComment ? "Надсилання..." : "Додати коментар"}
+                  </button>
+                </form>
+
+                {isLoadingComments ? (
+                  <p className="text-sm text-muted">Завантаження коментарів...</p>
+                ) : comments.length === 0 ? (
+                  <p className="text-sm text-muted">Коментарі відсутні.</p>
+                ) : (
+                  <ul className="space-y-3">
+                    {comments.map((comment) => (
+                      <li className="rounded-md border border-border px-3 py-2" key={comment.id}>
+                        <div className="mb-1 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
+                          <span>{comment.author_id === user.id ? "Ви" : comment.author_id}</span>
+                          <span>{formatDate(comment.created_at)}</span>
+                        </div>
+                        <p className="whitespace-pre-wrap text-sm leading-6 text-text">
+                          {comment.message}
+                        </p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
               <section className="rounded-lg border border-border bg-white p-5 shadow-sm">
                 <h2 className="mb-3 text-base font-semibold text-text">Зміна статусу</h2>
                 {availableStatuses.length > 0 ? (
