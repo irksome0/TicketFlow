@@ -9,6 +9,7 @@ import {
   getAttachments,
   getTicket,
   getTicketComments,
+  isApiError,
   updateTicketStatus,
   uploadAttachment,
 } from "@/lib/api";
@@ -202,6 +203,11 @@ export default function TicketDetailsPage() {
           setAttachments(loadedAttachments);
         }
       } catch (err) {
+        if (isApiError(err) && (err.status === 403 || err.status === 404)) {
+          router.replace("/tickets");
+          return;
+        }
+
         setError(err instanceof Error ? err.message : "Не вдалося отримати заявку.");
       } finally {
         setIsLoadingComments(false);
