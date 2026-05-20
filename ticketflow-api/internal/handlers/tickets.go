@@ -60,11 +60,13 @@ type statusHistoryResponse struct {
 }
 
 type ticketCommentResponse struct {
-	ID        uuid.UUID `json:"id"`
-	TicketID  uuid.UUID `json:"ticket_id"`
-	AuthorID  uuid.UUID `json:"author_id"`
-	Message   string    `json:"message"`
-	CreatedAt time.Time `json:"created_at"`
+	ID         uuid.UUID   `json:"id"`
+	TicketID   uuid.UUID   `json:"ticket_id"`
+	AuthorID   uuid.UUID   `json:"author_id"`
+	AuthorName string      `json:"author_name"`
+	AuthorRole models.Role `json:"author_role"`
+	Message    string      `json:"message"`
+	CreatedAt  time.Time   `json:"created_at"`
 }
 
 type createTicketCommentRequest struct {
@@ -522,12 +524,19 @@ func toTicketResponse(t models.Ticket) ticketResponse {
 }
 
 func toTicketCommentResponse(comment models.TicketComment) ticketCommentResponse {
+	authorName := strings.TrimSpace(comment.Author.FirstName + " " + comment.Author.LastName)
+	if authorName == "" {
+		authorName = comment.Author.Email
+	}
+
 	return ticketCommentResponse{
-		ID:        comment.ID,
-		TicketID:  comment.TicketID,
-		AuthorID:  comment.AuthorID,
-		Message:   comment.Message,
-		CreatedAt: comment.CreatedAt,
+		ID:         comment.ID,
+		TicketID:   comment.TicketID,
+		AuthorID:   comment.AuthorID,
+		AuthorName: authorName,
+		AuthorRole: comment.Author.Role,
+		Message:    comment.Message,
+		CreatedAt:  comment.CreatedAt,
 	}
 }
 

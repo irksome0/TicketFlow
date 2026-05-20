@@ -52,6 +52,13 @@ const roleTargets: Record<User["role"], TicketStatus[]> = {
   ],
 };
 
+const roleLabels: Record<User["role"], string> = {
+  client: "Client",
+  operator: "Operator",
+  engineer: "Engineer",
+  admin: "Admin",
+};
+
 function formatDate(value: string | null): string {
   if (!value) {
     return "Не встановлено";
@@ -405,7 +412,13 @@ export default function TicketDetailsPage() {
                     {comments.map((comment) => (
                       <li className="rounded-md border border-border px-3 py-2" key={comment.id}>
                         <div className="mb-1 flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
-                          <span>{comment.author_id === user.id ? "Ви" : comment.author_id}</span>
+                          <span className="font-medium text-text">
+                            {comment.author_name}
+                            {comment.author_id === user.id ? " (Ви)" : ""}
+                            <span className="ml-2 rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-muted">
+                              {roleLabels[comment.author_role]}
+                            </span>
+                          </span>
                           <span>{formatDate(comment.created_at)}</span>
                         </div>
                         <p className="whitespace-pre-wrap text-sm leading-6 text-text">
