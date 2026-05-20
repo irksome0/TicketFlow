@@ -155,7 +155,11 @@ func (r *ticketRepository) AssignTo(
 func (r *ticketRepository) CreateComment(
 	comment *models.TicketComment,
 ) error {
-	return r.db.Create(comment).Error
+	if err := r.db.Create(comment).Error; err != nil {
+		return err
+	}
+
+	return r.db.Preload("Author").First(comment, "id = ?", comment.ID).Error
 }
 
 func (r *ticketRepository) ListComments(
@@ -163,6 +167,7 @@ func (r *ticketRepository) ListComments(
 ) ([]models.TicketComment, error) {
 	var comments []models.TicketComment
 	err := r.db.
+		Preload("Author").
 		Where("ticket_id = ?", ticketID).
 		Order("created_at ASC").
 		Find(&comments).Error

@@ -56,6 +56,8 @@ export interface TicketComment {
   id: string;
   ticket_id: string;
   author_id: string;
+  author_name: string;
+  author_role: Role;
   message: string;
   created_at: string;
 }

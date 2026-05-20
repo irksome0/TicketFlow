@@ -24,6 +24,30 @@ type RequestOptions = Omit<RequestInit, "body"> & {
   body?: unknown;
 };
 
+function isPublicAuthPath(path: string): boolean {
+  return (
+    path === "/auth/login" ||
+    path === "/auth/register" ||
+    path === "/auth/register-organization" ||
+    path.startsWith("/users/invites/")
+  );
+}
+
+function handleUnauthorized(path: string): void {
+  clearAuth();
+
+  if (typeof window === "undefined" || isPublicAuthPath(path)) {
+    return;
+  }
+
+  const currentPath = window.location.pathname + window.location.search;
+  const loginPath = `/login?next=${encodeURIComponent(currentPath)}`;
+
+  if (window.location.pathname !== "/login") {
+    window.location.replace(loginPath);
+  }
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { body, ...init } = options;
   const token = getToken();
@@ -45,7 +69,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   });
 
   if (response.status === 401) {
-    clearAuth();
+    handleUnauthorized(path);
   }
 
   if (!response.ok) {
@@ -168,7 +192,7 @@ export async function downloadAttachment(
   );
 
   if (response.status === 401) {
-    clearAuth();
+    handleUnauthorized(`/tickets/${ticketId}/attachments/${attachment.id}/download`);
   }
 
   if (!response.ok) {
