@@ -24,6 +24,20 @@ type RequestOptions = Omit<RequestInit, "body"> & {
   body?: unknown;
 };
 
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+export function isApiError(error: unknown): error is ApiError {
+  return error instanceof ApiError;
+}
+
 function isPublicAuthPath(path: string): boolean {
   return (
     path === "/auth/login" ||
@@ -80,7 +94,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     } catch {
       message = response.statusText || message;
     }
-    throw new Error(message);
+    throw new ApiError(message, response.status);
   }
 
   if (response.status === 204) {
@@ -203,7 +217,7 @@ export async function downloadAttachment(
     } catch {
       message = response.statusText || message;
     }
-    throw new Error(message);
+    throw new ApiError(message, response.status);
   }
 
   const blob = await response.blob();
