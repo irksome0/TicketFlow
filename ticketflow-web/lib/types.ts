@@ -52,6 +52,14 @@ export interface TicketStatusHistory {
   changed_at: string;
 }
 
+export interface TicketComment {
+  id: string;
+  ticket_id: string;
+  author_id: string;
+  message: string;
+  created_at: string;
+}
+
 export interface Attachment {
   id: string;
   ticket_id: string;
