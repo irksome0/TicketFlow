@@ -418,6 +418,11 @@ export default function TicketDetailsPage() {
                             <span className="ml-2 rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-muted">
                               {roleLabels[comment.author_role]}
                             </span>
+                            {comment.author_id === ticket.creator_id ? (
+                              <span className="ml-2 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">
+                                Автор
+                              </span>
+                            ) : null}
                           </span>
                           <span>{formatDate(comment.created_at)}</span>
                         </div>
