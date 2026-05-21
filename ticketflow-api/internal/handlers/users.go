@@ -184,7 +184,7 @@ func (h *UserHandler) CreateInvite(c *gin.Context) {
 		return
 	}
 
-	email := strings.ToLower(strings.TrimSpace(req.Email))
+	email := normalizeEmail(req.Email)
 	if email == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "email є обов'язковим"})
 		return
@@ -263,11 +263,18 @@ func (h *UserHandler) AcceptInvite(c *gin.Context) {
 		return
 	}
 
-	firstName := strings.TrimSpace(req.FirstName)
-	lastName := strings.TrimSpace(req.LastName)
+	firstName := normalizeText(req.FirstName)
+	lastName := normalizeText(req.LastName)
 	if firstName == "" || lastName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "ім'я та прізвище є обов'язковими",
+		})
+		return
+	}
+
+	if textLength(firstName) > maxNameLength || textLength(lastName) > maxNameLength {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "ім'я та прізвище не повинні перевищувати 100 символів",
 		})
 		return
 	}

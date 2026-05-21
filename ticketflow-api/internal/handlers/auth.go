@@ -3,7 +3,6 @@ package handlers
 import (
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -99,6 +98,22 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
+	email := normalizeEmail(req.Email)
+	firstName := normalizeText(req.FirstName)
+	lastName := normalizeText(req.LastName)
+	if firstName == "" || lastName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "ім'я та прізвище є обов'язковими",
+		})
+		return
+	}
+	if textLength(firstName) > maxNameLength || textLength(lastName) > maxNameLength {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "ім'я та прізвище не повинні перевищувати 100 символів",
+		})
+		return
+	}
+
 	orgID, err := uuid.Parse(req.OrganizationID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -121,12 +136,12 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	user := &models.User{
 		ID:             uuid.New(),
 		OrganizationID: orgID,
-		Email:          req.Email,
+		Email:          email,
 		PasswordHash:   string(hash),
 		Role:           models.RoleClient,
 		TokenVersion:   1,
-		FirstName:      req.FirstName,
-		LastName:       req.LastName,
+		FirstName:      firstName,
+		LastName:       lastName,
 	}
 
 	if err := h.userRepo.Create(user); err != nil {
@@ -165,14 +180,20 @@ func (h *AuthHandler) RegisterOrganization(c *gin.Context) {
 		return
 	}
 
-	organizationName := strings.TrimSpace(req.OrganizationName)
-	firstName := strings.TrimSpace(req.FirstName)
-	lastName := strings.TrimSpace(req.LastName)
-	email := strings.TrimSpace(req.Email)
+	organizationName := normalizeText(req.OrganizationName)
+	firstName := normalizeText(req.FirstName)
+	lastName := normalizeText(req.LastName)
+	email := normalizeEmail(req.Email)
 
 	if organizationName == "" || firstName == "" || lastName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "назва організації, ім'я та прізвище є обов'язковими",
+		})
+		return
+	}
+	if textLength(firstName) > maxNameLength || textLength(lastName) > maxNameLength {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "ім'я та прізвище не повинні перевищувати 100 символів",
 		})
 		return
 	}
@@ -238,7 +259,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	user, err := h.userRepo.FindByEmail(req.Email)
+	email := normalizeEmail(req.Email)
+	user, err := h.userRepo.FindByEmail(email)
 	if err != nil {
 		// Однакова відповідь для обох випадків — захист від user enumeration.
 		c.JSON(http.StatusUnauthorized, gin.H{

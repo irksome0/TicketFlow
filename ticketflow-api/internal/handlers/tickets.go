@@ -192,12 +192,25 @@ func (h *TicketHandler) CreateTicket(c *gin.Context) {
 		return
 	}
 
+	title := normalizeText(req.Title)
+	description := normalizeLongText(req.Description)
+	titleLength := textLength(title)
+	descriptionLength := textLength(description)
+	if titleLength < 3 || titleLength > maxTicketTitleLength {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "назва заявки повинна містити від 3 до 255 символів"})
+		return
+	}
+	if descriptionLength < 10 || descriptionLength > maxDescriptionLength {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "опис заявки повинен містити від 10 до 5000 символів"})
+		return
+	}
+
 	ticket := &models.Ticket{
 		ID:             uuid.New(),
 		OrganizationID: orgID,
 		CreatorID:      userID,
-		Title:          req.Title,
-		Description:    req.Description,
+		Title:          title,
+		Description:    description,
 		Status:         models.StatusNew,
 		Priority:       req.Priority,
 	}
@@ -388,6 +401,11 @@ func (h *TicketHandler) CreateComment(c *gin.Context) {
 	message := strings.TrimSpace(req.Message)
 	if message == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "коментар не може бути порожнім"})
+		return
+	}
+
+	if textLength(message) > maxCommentLength {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "коментар не повинен перевищувати 2000 символів"})
 		return
 	}
 

@@ -4,6 +4,7 @@ package router
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"ticketflow-api/internal/handlers"
 	"ticketflow-api/internal/middleware"
@@ -25,22 +26,42 @@ func Setup(
 	r := gin.Default()
 
 	r.MaxMultipartMemory = 25 << 20
+	r.Use(middleware.SecurityHeaders())
 	r.Use(corsMiddleware(frontendOrigin))
+	r.Use(middleware.RateLimiter(middleware.RateLimitConfig{
+		Name:   "global",
+		Limit:  300,
+		Window: time.Minute,
+	}))
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	public := r.Group("/api/v1")
+	authLimiter := middleware.RateLimiter(middleware.RateLimitConfig{
+		Name:    "auth",
+		Limit:   10,
+		Window:  time.Minute,
+		KeyFunc: middleware.ClientIPRouteKey,
+	})
+	uploadLimiter := middleware.RateLimiter(middleware.RateLimitConfig{
+		Name:   "upload",
+		Limit:  20,
+		Window: time.Minute,
+	})
+
+	api := r.Group("/api/v1")
+
+	public := api.Group("")
 	{
-		public.POST("/auth/register", authHandler.Register)
-		public.POST("/auth/register-organization", authHandler.RegisterOrganization)
-		public.POST("/auth/login", authHandler.Login)
+		public.POST("/auth/register", authLimiter, authHandler.Register)
+		public.POST("/auth/register-organization", authLimiter, authHandler.RegisterOrganization)
+		public.POST("/auth/login", authLimiter, authHandler.Login)
 		public.GET("/users/invites/:token", userHandler.GetInvite)
-		public.POST("/users/invites/:token/accept", userHandler.AcceptInvite)
+		public.POST("/users/invites/:token/accept", authLimiter, userHandler.AcceptInvite)
 	}
 
-	protected := r.Group("/api/v1")
+	protected := api.Group("")
 	protected.Use(middleware.AuthMiddleware(jwtSecret, userRepo))
 	{
 		tickets := protected.Group("/tickets")
@@ -52,7 +73,7 @@ func Setup(
 			tickets.GET("/:id/comments", ticketHandler.ListComments)
 			tickets.POST("/:id/comments", ticketHandler.CreateComment)
 
-			tickets.POST("/:id/attachments", attachmentHandler.Upload)
+			tickets.POST("/:id/attachments", uploadLimiter, attachmentHandler.Upload)
 			tickets.GET("/:id/attachments", attachmentHandler.GetByTicket)
 			tickets.GET("/:id/attachments/:aid/download", attachmentHandler.Download)
 		}
