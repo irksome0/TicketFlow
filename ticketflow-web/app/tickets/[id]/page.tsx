@@ -203,7 +203,10 @@ export default function TicketDetailsPage() {
           setAttachments(loadedAttachments);
         }
       } catch (err) {
-        if (isApiError(err) && (err.status === 403 || err.status === 404)) {
+        if (
+          isApiError(err) &&
+          (err.status === 400 || err.status === 403 || err.status === 404)
+        ) {
           router.replace("/tickets");
           return;
         }
