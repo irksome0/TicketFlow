@@ -112,9 +112,14 @@ func (r *ticketRepository) UpdateStatus(
 ) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		updates := map[string]any{
-			"status":      toStatus,
-			"resolved_at": resolvedAt,
-			"updated_at":  time.Now().UTC(),
+			"status":     toStatus,
+			"updated_at": time.Now().UTC(),
+		}
+		if resolvedAt != nil {
+			updates["resolved_at"] = resolvedAt
+		}
+		if toStatus == models.StatusReopened {
+			updates["resolved_at"] = nil
 		}
 
 		if err := tx.Model(&models.Ticket{}).

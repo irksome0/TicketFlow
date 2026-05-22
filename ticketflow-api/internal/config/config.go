@@ -2,6 +2,7 @@
 package config
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strconv"
@@ -29,6 +30,14 @@ type Config struct {
 	FrontendOrigin string
 
 	AttachmentScanEnabled bool
+
+	SLATimeZone      string
+	SLABusinessStart time.Duration
+	SLABusinessEnd   time.Duration
+	SLAHolidays      []string
+	SLAHighLimit     time.Duration
+	SLAMediumLimit   time.Duration
+	SLALowLimit      time.Duration
 
 	StorageProvider   string
 	LocalStorageDir   string
@@ -63,6 +72,14 @@ func Load() *Config {
 
 		AttachmentScanEnabled: getEnvAsBool("ATTACHMENT_SCAN_ENABLED", true),
 
+		SLATimeZone:      getEnv("SLA_TIMEZONE", "Europe/Kyiv"),
+		SLABusinessStart: getEnvAsClock("SLA_BUSINESS_START", 9*time.Hour),
+		SLABusinessEnd:   getEnvAsClock("SLA_BUSINESS_END", 18*time.Hour),
+		SLAHolidays:      getEnvAsList("SLA_HOLIDAYS"),
+		SLAHighLimit:     time.Duration(getEnvAsInt("SLA_HIGH_HOURS", 8)) * time.Hour,
+		SLAMediumLimit:   time.Duration(getEnvAsInt("SLA_MEDIUM_HOURS", 24)) * time.Hour,
+		SLALowLimit:      time.Duration(getEnvAsInt("SLA_LOW_HOURS", 72)) * time.Hour,
+
 		StorageProvider:   strings.ToLower(strings.TrimSpace(getEnv("STORAGE_PROVIDER", "local"))),
 		LocalStorageDir:   getEnv("LOCAL_STORAGE_DIR", "uploads"),
 		R2AccountID:       strings.TrimSpace(getEnv("R2_ACCOUNT_ID", "")),
@@ -71,6 +88,21 @@ func Load() *Config {
 		R2SecretAccessKey: strings.TrimSpace(getEnv("R2_SECRET_ACCESS_KEY", "")),
 		R2Bucket:          strings.TrimSpace(getEnv("R2_BUCKET", "")),
 	}
+}
+
+func getEnvAsClock(key string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(getEnv(key, ""))
+	if raw == "" {
+		return fallback
+	}
+
+	value, err := time.Parse("15:04", raw)
+	if err != nil {
+		log.Printf("Некоректне значення %s=%q, використано %s", key, raw, formatClock(fallback))
+		return fallback
+	}
+
+	return time.Duration(value.Hour())*time.Hour + time.Duration(value.Minute())*time.Minute
 }
 
 func getEnv(key, fallback string) string {
@@ -107,9 +139,26 @@ func getEnvAsBool(key string, fallback bool) bool {
 	case "0", "false", "no", "n", "off":
 		return false
 	default:
-		log.Printf("РќРµРєРѕСЂРµРєС‚РЅРµ Р·РЅР°С‡РµРЅРЅСЏ %s=%q, РІРёРєРѕСЂРёСЃС‚Р°РЅРѕ %t", key, raw, fallback)
+		log.Printf("Некоректне значення %s=%q, використано %t", key, raw, fallback)
 		return fallback
 	}
+}
+
+func getEnvAsList(key string) []string {
+	raw := strings.TrimSpace(getEnv(key, ""))
+	if raw == "" {
+		return nil
+	}
+
+	parts := strings.Split(raw, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
 }
 
 func normalizeOrigin(origin string) string {
@@ -118,4 +167,9 @@ func normalizeOrigin(origin string) string {
 		return "*"
 	}
 	return origin
+}
+
+func formatClock(value time.Duration) string {
+	totalMinutes := int(value.Minutes())
+	return fmt.Sprintf("%02d:%02d", totalMinutes/60, totalMinutes%60)
 }

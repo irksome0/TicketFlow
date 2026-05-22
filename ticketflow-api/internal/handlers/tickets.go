@@ -12,14 +12,22 @@ import (
 
 	"ticketflow-api/internal/models"
 	"ticketflow-api/internal/repository"
+	"ticketflow-api/internal/sla"
 )
 
 type TicketHandler struct {
 	ticketRepo repository.TicketRepository
+	slaEngine  *sla.Engine
 }
 
-func NewTicketHandler(ticketRepo repository.TicketRepository) *TicketHandler {
-	return &TicketHandler{ticketRepo: ticketRepo}
+func NewTicketHandler(ticketRepo repository.TicketRepository, slaEngine *sla.Engine) *TicketHandler {
+	if slaEngine == nil {
+		slaEngine = sla.MustDefaultEngine()
+	}
+	return &TicketHandler{
+		ticketRepo: ticketRepo,
+		slaEngine:  slaEngine,
+	}
 }
 
 type createTicketRequest struct {
@@ -46,7 +54,13 @@ type ticketResponse struct {
 	UpdatedAt             time.Time               `json:"updated_at"`
 	SlaLimitSeconds       int64                   `json:"sla_limit_seconds"`
 	ActiveDurationSeconds int64                   `json:"active_duration_seconds"`
+	PausedDurationSeconds int64                   `json:"paused_duration_seconds"`
+	SlaRemainingSeconds   int64                   `json:"sla_remaining_seconds"`
 	SlaStatus             string                  `json:"sla_status"`
+	SlaDueAt              *time.Time              `json:"sla_due_at"`
+	SlaBreachedAt         *time.Time              `json:"sla_breached_at"`
+	SlaCalendarTimezone   string                  `json:"sla_calendar_timezone"`
+	SlaBusinessHours      string                  `json:"sla_business_hours"`
 	StatusHistory         []statusHistoryResponse `json:"status_history,omitempty"`
 }
 
@@ -162,7 +176,7 @@ func (h *TicketHandler) ListTickets(c *gin.Context) {
 
 	response := make([]ticketResponse, len(tickets))
 	for i, t := range tickets {
-		response[i] = toTicketResponse(t)
+		response[i] = h.toTicketResponse(t)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -209,11 +223,11 @@ func (h *TicketHandler) CreateTicket(c *gin.Context) {
 
 	created, err := h.ticketRepo.FindByID(ticket.ID)
 	if err != nil {
-		c.JSON(http.StatusCreated, toTicketResponse(*ticket))
+		c.JSON(http.StatusCreated, h.toTicketResponse(*ticket))
 		return
 	}
 
-	c.JSON(http.StatusCreated, toTicketResponse(*created))
+	c.JSON(http.StatusCreated, h.toTicketResponse(*created))
 }
 
 func (h *TicketHandler) GetTicket(c *gin.Context) {
@@ -257,7 +271,7 @@ func (h *TicketHandler) GetTicket(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, toTicketResponse(*ticket))
+	c.JSON(http.StatusOK, h.toTicketResponse(*ticket))
 }
 
 func (h *TicketHandler) UpdateTicketStatus(c *gin.Context) {
@@ -345,7 +359,7 @@ func (h *TicketHandler) UpdateTicketStatus(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, toTicketResponse(*updated))
+	c.JSON(http.StatusOK, h.toTicketResponse(*updated))
 }
 
 func (h *TicketHandler) ListComments(c *gin.Context) {
@@ -488,10 +502,8 @@ func isValidStatus(status models.TicketStatus) bool {
 	}
 }
 
-func toTicketResponse(t models.Ticket) ticketResponse {
-	limit := slaLimit(t.Priority)
-	active := activeDuration(t, time.Now().UTC())
-
+func (h *TicketHandler) toTicketResponse(t models.Ticket) ticketResponse {
+	slaResult := h.slaEngine.Calculate(t, time.Now().UTC())
 	history := make([]statusHistoryResponse, len(t.StatusHistory))
 	for i, item := range t.StatusHistory {
 		history[i] = statusHistoryResponse{
@@ -516,9 +528,15 @@ func toTicketResponse(t models.Ticket) ticketResponse {
 		CreatedAt:             t.CreatedAt,
 		ResolvedAt:            t.ResolvedAt,
 		UpdatedAt:             t.UpdatedAt,
-		SlaLimitSeconds:       int64(limit.Seconds()),
-		ActiveDurationSeconds: int64(active.Seconds()),
-		SlaStatus:             slaStatus(t.Status, active, limit),
+		SlaLimitSeconds:       int64(slaResult.Limit.Seconds()),
+		ActiveDurationSeconds: int64(slaResult.ActiveDuration.Seconds()),
+		PausedDurationSeconds: int64(slaResult.PausedDuration.Seconds()),
+		SlaRemainingSeconds:   int64(slaResult.RemainingDuration.Seconds()),
+		SlaStatus:             string(slaResult.Status),
+		SlaDueAt:              slaResult.DueAt,
+		SlaBreachedAt:         slaResult.BreachedAt,
+		SlaCalendarTimezone:   slaResult.CalendarTimezone,
+		SlaBusinessHours:      slaResult.BusinessHours,
 		StatusHistory:         history,
 	}
 }
@@ -537,73 +555,6 @@ func toTicketCommentResponse(comment models.TicketComment) ticketCommentResponse
 		AuthorRole: comment.Author.Role,
 		Message:    comment.Message,
 		CreatedAt:  comment.CreatedAt,
-	}
-}
-
-func slaLimit(priority models.TicketPriority) time.Duration {
-	switch priority {
-	case models.PriorityHigh:
-		return 8 * time.Hour
-	case models.PriorityLow:
-		return 72 * time.Hour
-	default:
-		return 24 * time.Hour
-	}
-}
-
-func activeDuration(ticket models.Ticket, now time.Time) time.Duration {
-	if len(ticket.StatusHistory) == 0 {
-		end := now
-		if ticket.ResolvedAt != nil {
-			end = *ticket.ResolvedAt
-		}
-		if end.Before(ticket.CreatedAt) {
-			return 0
-		}
-		return end.Sub(ticket.CreatedAt)
-	}
-
-	var total time.Duration
-	for i, item := range ticket.StatusHistory {
-		start := item.CreatedAt
-		end := now
-		if i+1 < len(ticket.StatusHistory) {
-			end = ticket.StatusHistory[i+1].CreatedAt
-		} else if ticket.ResolvedAt != nil && ticket.ResolvedAt.Before(now) {
-			end = *ticket.ResolvedAt
-		}
-
-		if isActiveSLAStatus(item.ToStatus) && end.After(start) {
-			total += end.Sub(start)
-		}
-	}
-
-	return total
-}
-
-func isActiveSLAStatus(status models.TicketStatus) bool {
-	switch status {
-	case models.StatusNew, models.StatusInProgress, models.StatusReopened:
-		return true
-	default:
-		return false
-	}
-}
-
-func slaStatus(status models.TicketStatus, active, limit time.Duration) string {
-	switch status {
-	case models.StatusPending, models.StatusWaiting, models.StatusOnHold:
-		return "Paused"
-	case models.StatusResolved, models.StatusClosed:
-		if active <= limit {
-			return "Met"
-		}
-		return "Breached"
-	default:
-		if active <= limit {
-			return "Within SLA"
-		}
-		return "Breached"
 	}
 }
 

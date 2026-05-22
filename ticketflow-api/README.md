@@ -32,6 +32,13 @@ Required variables:
 | `DB_TIMEZONE` | Use `UTC` for SLA consistency. |
 | `JWT_SECRET` | Long random secret for signing JWT tokens. |
 | `JWT_TTL_HOURS` | Access token lifetime in hours. |
+| `SLA_TIMEZONE` | IANA timezone for SLA business calendar, for example `Europe/Kyiv`. |
+| `SLA_BUSINESS_START` | Start of business hours in `HH:MM` format. |
+| `SLA_BUSINESS_END` | End of business hours in `HH:MM` format. |
+| `SLA_HOLIDAYS` | Optional comma-separated dates in `YYYY-MM-DD` format that are excluded from SLA time. |
+| `SLA_HIGH_HOURS` | High-priority SLA limit in business hours. |
+| `SLA_MEDIUM_HOURS` | Medium-priority SLA limit in business hours. |
+| `SLA_LOW_HOURS` | Low-priority SLA limit in business hours. |
 
 ## Local Run
 
@@ -102,6 +109,7 @@ Implemented:
 - token invalidation through `token_version` after role changes;
 - organization-based multi-tenant checks in handlers;
 - role-based access control;
+- SLA engine based on priority policies, business hours, weekends, holidays, status history, and pause statuses;
 - attachment size and extension validation;
 - path-safe attachment storage;
 - health endpoint for deployment checks.

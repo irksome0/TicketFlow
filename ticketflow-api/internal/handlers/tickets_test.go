@@ -181,7 +181,7 @@ func TestCreateCommentAccessRules(t *testing.T) {
 				comments: map[uuid.UUID][]models.TicketComment{},
 			}
 			router := gin.New()
-			handler := NewTicketHandler(repo)
+			handler := NewTicketHandler(repo, nil)
 			router.POST("/tickets/:id/comments", withUser(tt.userID, tt.orgID, tt.role), handler.CreateComment)
 
 			req := httptest.NewRequest(http.MethodPost, "/tickets/"+ticketID.String()+"/comments", strings.NewReader(tt.body))
@@ -214,7 +214,7 @@ func TestListCommentsAccessAndErrors(t *testing.T) {
 			},
 		}
 		router := gin.New()
-		handler := NewTicketHandler(repo)
+		handler := NewTicketHandler(repo, nil)
 		router.GET("/tickets/:id/comments", withUser(clientID, orgID, models.RoleClient), handler.ListComments)
 
 		res := httptest.NewRecorder()
@@ -235,7 +235,7 @@ func TestListCommentsAccessAndErrors(t *testing.T) {
 	t.Run("invalid ticket id returns bad request", func(t *testing.T) {
 		repo := &fakeTicketRepo{tickets: map[uuid.UUID]*models.Ticket{}, comments: map[uuid.UUID][]models.TicketComment{}}
 		router := gin.New()
-		handler := NewTicketHandler(repo)
+		handler := NewTicketHandler(repo, nil)
 		router.GET("/tickets/:id/comments", withUser(clientID, orgID, models.RoleClient), handler.ListComments)
 
 		res := httptest.NewRecorder()
@@ -249,7 +249,7 @@ func TestListCommentsAccessAndErrors(t *testing.T) {
 	t.Run("missing ticket returns not found", func(t *testing.T) {
 		repo := &fakeTicketRepo{tickets: map[uuid.UUID]*models.Ticket{}, comments: map[uuid.UUID][]models.TicketComment{}}
 		router := gin.New()
-		handler := NewTicketHandler(repo)
+		handler := NewTicketHandler(repo, nil)
 		router.GET("/tickets/:id/comments", withUser(clientID, orgID, models.RoleClient), handler.ListComments)
 
 		res := httptest.NewRecorder()
@@ -280,7 +280,7 @@ func TestInvalidStatusTransitionDoesNotUpdateTicket(t *testing.T) {
 	}
 
 	router := gin.New()
-	handler := NewTicketHandler(repo)
+	handler := NewTicketHandler(repo, nil)
 	router.PATCH("/tickets/:id/status", withUser(userID, orgID, models.RoleOperator), handler.UpdateTicketStatus)
 
 	req := httptest.NewRequest(http.MethodPatch, "/tickets/"+ticketID.String()+"/status", strings.NewReader(`{"status":"Resolved"}`))

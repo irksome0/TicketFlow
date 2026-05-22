@@ -4,15 +4,18 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"ticketflow-api/internal/config"
 	"ticketflow-api/internal/database"
 	"ticketflow-api/internal/handlers"
+	"ticketflow-api/internal/models"
 	"ticketflow-api/internal/repository"
 	"ticketflow-api/internal/router"
 	"ticketflow-api/internal/security"
+	"ticketflow-api/internal/sla"
 	"ticketflow-api/internal/storage"
 )
 
@@ -26,6 +29,10 @@ func main() {
 	inviteRepo := repository.NewInviteRepository(database)
 	organizationRepo := repository.NewOrganizationRepository(database)
 	ticketRepo := repository.NewTicketRepository(database)
+	slaEngine, err := buildSLAEngine(cfg)
+	if err != nil {
+		log.Fatalf("sla: %v", err)
+	}
 
 	authHandler := handlers.NewAuthHandler(
 		userRepo,
@@ -33,7 +40,7 @@ func main() {
 		cfg.JWTSecret,
 		cfg.JWTTTL,
 	)
-	ticketHandler := handlers.NewTicketHandler(ticketRepo)
+	ticketHandler := handlers.NewTicketHandler(ticketRepo, slaEngine)
 	userHandler := handlers.NewUserHandler(userRepo, inviteRepo, cfg.FrontendOrigin)
 	var attachmentScanner security.AttachmentScanner = security.NoopAttachmentScanner{}
 	if cfg.AttachmentScanEnabled {
@@ -60,6 +67,20 @@ func main() {
 	if err := r.Run(":" + cfg.ServerPort); err != nil {
 		log.Fatalf("server: %v", err)
 	}
+}
+
+func buildSLAEngine(cfg *config.Config) (*sla.Engine, error) {
+	return sla.NewEngine(sla.Config{
+		LocationName:  cfg.SLATimeZone,
+		BusinessStart: cfg.SLABusinessStart,
+		BusinessEnd:   cfg.SLABusinessEnd,
+		Holidays:      cfg.SLAHolidays,
+		PolicyLimits: map[models.TicketPriority]time.Duration{
+			models.PriorityHigh:   cfg.SLAHighLimit,
+			models.PriorityMedium: cfg.SLAMediumLimit,
+			models.PriorityLow:    cfg.SLALowLimit,
+		},
+	})
 }
 
 func buildFileStorage(ctx context.Context, cfg *config.Config) (storage.FileStorage, string, error) {

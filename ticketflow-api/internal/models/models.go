@@ -79,7 +79,7 @@ type OrganizationInvite struct {
 	Creator      User         `gorm:"foreignKey:CreatedBy"`
 }
 
-// Ticket представляє заявку клієнта із ключовими полями для SLA
+// Ticket представляє заявку клієнта із ключовими полями для SLA-engine.
 type Ticket struct {
 	ID             uuid.UUID      `gorm:"type:uuid;default:gen_random_uuid();primaryKey"`
 	OrganizationID uuid.UUID      `gorm:"type:uuid;not null;index"`
@@ -90,7 +90,7 @@ type Ticket struct {
 	Status         TicketStatus   `gorm:"type:ticket_status;default:'New';index"`
 	Priority       TicketPriority `gorm:"type:ticket_priority;default:'Medium'"`
 	CreatedAt      time.Time      `gorm:"index"`
-	ResolvedAt     *time.Time     // Важливе поле для розрахунку SLA
+	ResolvedAt     *time.Time     // Фіксує момент вирішення для завершення SLA-циклу
 	UpdatedAt      time.Time
 
 	// Навігаційні властивості GORM
