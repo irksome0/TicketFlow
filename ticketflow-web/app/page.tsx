@@ -51,8 +51,8 @@ export default function HomePage() {
           <article className="rounded-lg border border-border bg-white p-5">
             <h2 className="text-base font-semibold text-text">SLA-контроль</h2>
             <p className="mt-2 text-sm leading-6 text-muted">
-              Час опрацювання розраховується з урахуванням пріоритету та
-              активного часу заявки.
+              SLA-engine враховує пріоритет, робочі години, вихідні, святкові
+              дні та паузи очікування.
             </p>
           </article>
         </div>

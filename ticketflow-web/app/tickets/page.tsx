@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { getTickets } from "@/lib/api";
 import { clearAuth, getStoredUser, getToken } from "@/lib/auth";
-import type { Ticket, TicketPriority, TicketStatus, User } from "@/lib/types";
+import type { SlaStatus, Ticket, TicketPriority, TicketStatus, User } from "@/lib/types";
 
 const statuses: TicketStatus[] = [
   "New",
@@ -49,6 +49,39 @@ function priorityClass(priority: TicketPriority): string {
     case "Low":
       return "border-green-200 bg-green-50 text-success";
   }
+}
+
+function slaClass(status: SlaStatus): string {
+  switch (status) {
+    case "Within SLA":
+    case "Met":
+      return "border-green-200 bg-green-50 text-success";
+    case "Paused":
+      return "border-amber-200 bg-amber-50 text-warning";
+    case "Breached":
+      return "border-red-200 bg-red-50 text-danger";
+  }
+}
+
+function slaLabel(status: SlaStatus): string {
+  switch (status) {
+    case "Within SLA":
+      return "В межах SLA";
+    case "Paused":
+      return "SLA на паузі";
+    case "Met":
+      return "SLA виконано";
+    case "Breached":
+      return "SLA порушено";
+  }
+}
+
+function formatDuration(seconds: number): string {
+  const hours = seconds / 3600;
+  if (hours < 1) {
+    return `${Math.round(seconds / 60)} хв`;
+  }
+  return `${hours.toFixed(1)} год`;
 }
 
 function formatDate(value: string): string {
@@ -265,7 +298,15 @@ export default function TicketsPage() {
                         </span>
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-muted">
-                        {ticket.sla_status}
+                        <span
+                          className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${slaClass(ticket.sla_status)}`}
+                        >
+                          {slaLabel(ticket.sla_status)}
+                        </span>
+                        <p className="mt-1 text-xs text-muted">
+                          {formatDuration(ticket.active_duration_seconds)} /{" "}
+                          {formatDuration(ticket.sla_limit_seconds)}
+                        </p>
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-muted">
                         {formatDate(ticket.created_at)}

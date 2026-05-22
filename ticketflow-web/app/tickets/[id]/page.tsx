@@ -136,8 +136,13 @@ function slaLabel(status: SlaStatus): string {
 }
 
 function getSlaText(ticket: Ticket): { label: string; className: string } {
+  const remaining =
+    ticket.sla_status === "Within SLA"
+      ? `, залишилось ${formatDuration(ticket.sla_remaining_seconds)}`
+      : "";
+
   return {
-    label: `${slaLabel(ticket.sla_status)}: ${formatDuration(ticket.active_duration_seconds)} / ${formatDuration(ticket.sla_limit_seconds)}`,
+    label: `${slaLabel(ticket.sla_status)}: ${formatDuration(ticket.active_duration_seconds)} / ${formatDuration(ticket.sla_limit_seconds)}${remaining}`,
     className: slaClass(ticket.sla_status),
   };
 }
@@ -367,6 +372,32 @@ export default function TicketDetailsPage() {
                     ) : null}
                   </dd>
                 </div>
+                <div>
+                  <dt className="text-xs uppercase text-muted">SLA дедлайн</dt>
+                  <dd className="mt-1 font-medium text-text">
+                    {formatDate(ticket.sla_due_at)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase text-muted">SLA пауза</dt>
+                  <dd className="mt-1 font-medium text-text">
+                    {formatDuration(ticket.paused_duration_seconds)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase text-muted">Робочий календар</dt>
+                  <dd className="mt-1 font-medium text-text">
+                    {ticket.sla_business_hours}, {ticket.sla_calendar_timezone}
+                  </dd>
+                </div>
+                {ticket.sla_breached_at ? (
+                  <div>
+                    <dt className="text-xs uppercase text-muted">Час порушення SLA</dt>
+                    <dd className="mt-1 font-medium text-text">
+                      {formatDate(ticket.sla_breached_at)}
+                    </dd>
+                  </div>
+                ) : null}
               </dl>
 
               {ticket.status_history && ticket.status_history.length > 0 ? (
@@ -378,7 +409,7 @@ export default function TicketDetailsPage() {
                         <span className="font-medium text-text">
                           {item.from_status ?? "Створено"} {"->"} {item.to_status}
                         </span>
-                        <span className="ml-2 text-muted">{formatDate(item.changed_at)}</span>
+                        <span className="ml-2 text-muted">{formatDate(item.created_at)}</span>
                       </li>
                     ))}
                   </ul>

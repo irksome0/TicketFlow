@@ -39,7 +39,13 @@ export interface Ticket {
   updated_at: string;
   sla_limit_seconds: number;
   active_duration_seconds: number;
+  paused_duration_seconds: number;
+  sla_remaining_seconds: number;
   sla_status: SlaStatus;
+  sla_due_at: string | null;
+  sla_breached_at: string | null;
+  sla_calendar_timezone: string;
+  sla_business_hours: string;
   status_history?: TicketStatusHistory[];
 }
 
@@ -48,8 +54,8 @@ export interface TicketStatusHistory {
   ticket_id: string;
   from_status: TicketStatus | null;
   to_status: TicketStatus;
-  changed_by_id: string;
-  changed_at: string;
+  changed_by: string;
+  created_at: string;
 }
 
 export interface TicketComment {
