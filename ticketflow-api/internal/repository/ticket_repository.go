@@ -94,6 +94,9 @@ func (r *ticketRepository) ListByOrganization(
 	}
 
 	err := query.
+		Preload("StatusHistory", func(db *gorm.DB) *gorm.DB {
+			return db.Order("created_at ASC")
+		}).
 		Order("created_at DESC").
 		Find(&tickets).Error
 
