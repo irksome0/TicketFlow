@@ -40,7 +40,7 @@ func main() {
 		cfg.JWTSecret,
 		cfg.JWTTTL,
 	)
-	ticketHandler := handlers.NewTicketHandler(ticketRepo, slaEngine)
+	ticketHandler := handlers.NewTicketHandler(ticketRepo, userRepo, slaEngine)
 	userHandler := handlers.NewUserHandler(userRepo, inviteRepo, cfg.FrontendOrigin)
 	var attachmentScanner security.AttachmentScanner = security.NoopAttachmentScanner{}
 	if cfg.AttachmentScanEnabled {

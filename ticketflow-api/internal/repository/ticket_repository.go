@@ -28,7 +28,7 @@ type TicketRepository interface {
 		changedBy uuid.UUID,
 	) error
 	ListStatusHistory(ticketID uuid.UUID) ([]models.TicketStatusHistory, error)
-	AssignTo(id uuid.UUID, assigneeID uuid.UUID) error
+	AssignTo(id uuid.UUID, assigneeID *uuid.UUID) error
 	CreateComment(comment *models.TicketComment) error
 	ListComments(ticketID uuid.UUID) ([]models.TicketComment, error)
 }
@@ -59,6 +59,7 @@ func (r *ticketRepository) Create(ticket *models.Ticket) error {
 func (r *ticketRepository) FindByID(id uuid.UUID) (*models.Ticket, error) {
 	var ticket models.Ticket
 	err := r.db.
+		Preload("Assignee").
 		Preload("Attachments").
 		Preload("Comments").
 		Preload("StatusHistory", func(db *gorm.DB) *gorm.DB {
@@ -94,6 +95,7 @@ func (r *ticketRepository) ListByOrganization(
 	}
 
 	err := query.
+		Preload("Assignee").
 		Preload("StatusHistory", func(db *gorm.DB) *gorm.DB {
 			return db.Order("created_at ASC")
 		}).
@@ -150,7 +152,7 @@ func (r *ticketRepository) ListStatusHistory(
 
 func (r *ticketRepository) AssignTo(
 	id uuid.UUID,
-	assigneeID uuid.UUID,
+	assigneeID *uuid.UUID,
 ) error {
 	return r.db.Model(&models.Ticket{}).
 		Where("id = ?", id).

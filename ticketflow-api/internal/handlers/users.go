@@ -106,6 +106,33 @@ func (h *UserHandler) GetAll(c *gin.Context) {
 	})
 }
 
+func (h *UserHandler) GetEngineers(c *gin.Context) {
+	orgID, ok := mustGetOrgID(c)
+	if !ok {
+		return
+	}
+
+	users, err := h.userRepo.ListByOrganization(orgID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "помилка отримання списку інженерів",
+		})
+		return
+	}
+
+	response := make([]userResponse, 0, len(users))
+	for _, user := range users {
+		if user.Role == models.RoleEngineer {
+			response = append(response, toUserResponse(user))
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":  response,
+		"total": len(response),
+	})
+}
+
 func (h *UserHandler) UpdateRole(c *gin.Context) {
 	orgID, ok := mustGetOrgID(c)
 	if !ok {

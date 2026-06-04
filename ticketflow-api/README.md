@@ -52,17 +52,22 @@ go run ./cmd
 From the repository root:
 
 ```bash
-cp .env.example .env
 docker compose up --build
 ```
+
+The root `.env` file is optional for local Docker usage. Without it, Docker
+Compose uses local development defaults for PostgreSQL, API, and frontend ports.
+Create `.env` from `.env.example` only when these defaults must be changed.
 
 This starts:
 
 - PostgreSQL on `localhost:5432`;
 - TicketFlow API on `localhost:8080`;
+- TicketFlow frontend on `localhost:3000`;
 - a local `ticketflow-api/uploads` directory mounted into the API container.
 
-The root `.env` file is used only by Docker Compose and must not be committed.
+The root `.env` file is used only by Docker Compose overrides and must not be
+committed.
 
 Stop containers:
 

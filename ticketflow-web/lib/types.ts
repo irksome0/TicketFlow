@@ -30,6 +30,7 @@ export interface Ticket {
   organization_id: string;
   creator_id: string;
   assignee_id: string | null;
+  assignee?: User | null;
   title: string;
   description: string;
   status: TicketStatus;

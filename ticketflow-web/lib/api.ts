@@ -123,6 +123,7 @@ export function registerOrganization(
 export function getTickets(filters?: {
   status?: TicketStatus;
   priority?: TicketPriority;
+  assigneeId?: string;
 }): Promise<ListResponse<Ticket>> {
   const params = new URLSearchParams();
 
@@ -131,6 +132,9 @@ export function getTickets(filters?: {
   }
   if (filters?.priority) {
     params.set("priority", filters.priority);
+  }
+  if (filters?.assigneeId) {
+    params.set("assignee_id", filters.assigneeId);
   }
 
   const query = params.toString();
@@ -159,6 +163,16 @@ export function updateTicketStatus(
   return request<Ticket>(`/tickets/${id}/status`, {
     method: "PATCH",
     body: { status },
+  });
+}
+
+export function assignTicket(
+  id: string,
+  assigneeId: string | null,
+): Promise<Ticket> {
+  return request<Ticket>(`/tickets/${id}/assignee`, {
+    method: "PATCH",
+    body: { assignee_id: assigneeId },
   });
 }
 
@@ -233,6 +247,10 @@ export async function downloadAttachment(
 
 export function getUsers(): Promise<ListResponse<User>> {
   return request<ListResponse<User>>("/users");
+}
+
+export function getEngineers(): Promise<ListResponse<User>> {
+  return request<ListResponse<User>>("/users/engineers");
 }
 
 export function updateUserRole(id: string, role: Role): Promise<User> {

@@ -25,6 +25,8 @@ type fakeTicketRepo struct {
 	comments     map[uuid.UUID][]models.TicketComment
 	findErr      error
 	updateCalled bool
+	assignCalled bool
+	assignedID   *uuid.UUID
 }
 
 func (r *fakeTicketRepo) Create(ticket *models.Ticket) error {
@@ -56,7 +58,12 @@ func (r *fakeTicketRepo) ListStatusHistory(uuid.UUID) ([]models.TicketStatusHist
 	return nil, nil
 }
 
-func (r *fakeTicketRepo) AssignTo(uuid.UUID, uuid.UUID) error {
+func (r *fakeTicketRepo) AssignTo(id uuid.UUID, assigneeID *uuid.UUID) error {
+	r.assignCalled = true
+	r.assignedID = assigneeID
+	if ticket, ok := r.tickets[id]; ok {
+		ticket.AssigneeID = assigneeID
+	}
 	return nil
 }
 
@@ -70,6 +77,40 @@ func (r *fakeTicketRepo) CreateComment(comment *models.TicketComment) error {
 
 func (r *fakeTicketRepo) ListComments(ticketID uuid.UUID) ([]models.TicketComment, error) {
 	return r.comments[ticketID], nil
+}
+
+type fakeUserRepo struct {
+	users map[uuid.UUID]*models.User
+}
+
+func (r *fakeUserRepo) Create(*models.User) error {
+	return nil
+}
+
+func (r *fakeUserRepo) FindByEmail(string) (*models.User, error) {
+	return nil, gorm.ErrRecordNotFound
+}
+
+func (r *fakeUserRepo) FindByID(id uuid.UUID) (*models.User, error) {
+	user, ok := r.users[id]
+	if !ok {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return user, nil
+}
+
+func (r *fakeUserRepo) ListByOrganization(orgID uuid.UUID) ([]models.User, error) {
+	users := make([]models.User, 0, len(r.users))
+	for _, user := range r.users {
+		if user.OrganizationID == orgID {
+			users = append(users, *user)
+		}
+	}
+	return users, nil
+}
+
+func (r *fakeUserRepo) UpdateRole(uuid.UUID, models.Role) error {
+	return nil
 }
 
 type fakeAttachmentRepo struct {
@@ -181,7 +222,7 @@ func TestCreateCommentAccessRules(t *testing.T) {
 				comments: map[uuid.UUID][]models.TicketComment{},
 			}
 			router := gin.New()
-			handler := NewTicketHandler(repo, nil)
+			handler := NewTicketHandler(repo, nil, nil)
 			router.POST("/tickets/:id/comments", withUser(tt.userID, tt.orgID, tt.role), handler.CreateComment)
 
 			req := httptest.NewRequest(http.MethodPost, "/tickets/"+ticketID.String()+"/comments", strings.NewReader(tt.body))
@@ -214,7 +255,7 @@ func TestListCommentsAccessAndErrors(t *testing.T) {
 			},
 		}
 		router := gin.New()
-		handler := NewTicketHandler(repo, nil)
+		handler := NewTicketHandler(repo, nil, nil)
 		router.GET("/tickets/:id/comments", withUser(clientID, orgID, models.RoleClient), handler.ListComments)
 
 		res := httptest.NewRecorder()
@@ -235,7 +276,7 @@ func TestListCommentsAccessAndErrors(t *testing.T) {
 	t.Run("invalid ticket id returns bad request", func(t *testing.T) {
 		repo := &fakeTicketRepo{tickets: map[uuid.UUID]*models.Ticket{}, comments: map[uuid.UUID][]models.TicketComment{}}
 		router := gin.New()
-		handler := NewTicketHandler(repo, nil)
+		handler := NewTicketHandler(repo, nil, nil)
 		router.GET("/tickets/:id/comments", withUser(clientID, orgID, models.RoleClient), handler.ListComments)
 
 		res := httptest.NewRecorder()
@@ -249,7 +290,7 @@ func TestListCommentsAccessAndErrors(t *testing.T) {
 	t.Run("missing ticket returns not found", func(t *testing.T) {
 		repo := &fakeTicketRepo{tickets: map[uuid.UUID]*models.Ticket{}, comments: map[uuid.UUID][]models.TicketComment{}}
 		router := gin.New()
-		handler := NewTicketHandler(repo, nil)
+		handler := NewTicketHandler(repo, nil, nil)
 		router.GET("/tickets/:id/comments", withUser(clientID, orgID, models.RoleClient), handler.ListComments)
 
 		res := httptest.NewRecorder()
@@ -280,7 +321,7 @@ func TestInvalidStatusTransitionDoesNotUpdateTicket(t *testing.T) {
 	}
 
 	router := gin.New()
-	handler := NewTicketHandler(repo, nil)
+	handler := NewTicketHandler(repo, nil, nil)
 	router.PATCH("/tickets/:id/status", withUser(userID, orgID, models.RoleOperator), handler.UpdateTicketStatus)
 
 	req := httptest.NewRequest(http.MethodPatch, "/tickets/"+ticketID.String()+"/status", strings.NewReader(`{"status":"Resolved"}`))
@@ -294,6 +335,149 @@ func TestInvalidStatusTransitionDoesNotUpdateTicket(t *testing.T) {
 	}
 	if repo.updateCalled {
 		t.Fatal("UpdateStatus was called for an invalid transition")
+	}
+}
+
+func TestAssignTicketAccessRules(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	orgID := uuid.New()
+	otherOrgID := uuid.New()
+	operatorID := uuid.New()
+	clientID := uuid.New()
+	ticketID := uuid.New()
+	engineerID := uuid.New()
+	otherOrgEngineerID := uuid.New()
+	clientAssigneeID := uuid.New()
+
+	tests := []struct {
+		name             string
+		userID           uuid.UUID
+		orgID            uuid.UUID
+		role             models.Role
+		body             string
+		wantStatus       int
+		wantAssignCalled bool
+		wantAssigneeID   *uuid.UUID
+	}{
+		{
+			name:             "operator can assign organization engineer",
+			userID:           operatorID,
+			orgID:            orgID,
+			role:             models.RoleOperator,
+			body:             `{"assignee_id":"` + engineerID.String() + `"}`,
+			wantStatus:       http.StatusOK,
+			wantAssignCalled: true,
+			wantAssigneeID:   &engineerID,
+		},
+		{
+			name:             "operator can clear assignee",
+			userID:           operatorID,
+			orgID:            orgID,
+			role:             models.RoleOperator,
+			body:             `{"assignee_id":null}`,
+			wantStatus:       http.StatusOK,
+			wantAssignCalled: true,
+			wantAssigneeID:   nil,
+		},
+		{
+			name:             "client cannot assign ticket",
+			userID:           clientID,
+			orgID:            orgID,
+			role:             models.RoleClient,
+			body:             `{"assignee_id":"` + engineerID.String() + `"}`,
+			wantStatus:       http.StatusForbidden,
+			wantAssignCalled: false,
+		},
+		{
+			name:             "assignee must belong to organization",
+			userID:           operatorID,
+			orgID:            orgID,
+			role:             models.RoleOperator,
+			body:             `{"assignee_id":"` + otherOrgEngineerID.String() + `"}`,
+			wantStatus:       http.StatusNotFound,
+			wantAssignCalled: false,
+		},
+		{
+			name:             "assignee must be engineer",
+			userID:           operatorID,
+			orgID:            orgID,
+			role:             models.RoleOperator,
+			body:             `{"assignee_id":"` + clientAssigneeID.String() + `"}`,
+			wantStatus:       http.StatusBadRequest,
+			wantAssignCalled: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ticketRepo := &fakeTicketRepo{
+				tickets: map[uuid.UUID]*models.Ticket{
+					ticketID: {
+						ID:             ticketID,
+						OrganizationID: orgID,
+						CreatorID:      clientID,
+						Status:         models.StatusNew,
+						Priority:       models.PriorityMedium,
+						CreatedAt:      time.Now().UTC(),
+					},
+				},
+				comments: map[uuid.UUID][]models.TicketComment{},
+			}
+			userRepo := &fakeUserRepo{
+				users: map[uuid.UUID]*models.User{
+					engineerID: {
+						ID:             engineerID,
+						OrganizationID: orgID,
+						Role:           models.RoleEngineer,
+						Email:          "engineer@example.com",
+						FirstName:      "Test",
+						LastName:       "Engineer",
+					},
+					otherOrgEngineerID: {
+						ID:             otherOrgEngineerID,
+						OrganizationID: otherOrgID,
+						Role:           models.RoleEngineer,
+						Email:          "other@example.com",
+						FirstName:      "Other",
+						LastName:       "Engineer",
+					},
+					clientAssigneeID: {
+						ID:             clientAssigneeID,
+						OrganizationID: orgID,
+						Role:           models.RoleClient,
+						Email:          "client@example.com",
+						FirstName:      "Test",
+						LastName:       "Client",
+					},
+				},
+			}
+			router := gin.New()
+			handler := NewTicketHandler(ticketRepo, userRepo, nil)
+			router.PATCH("/tickets/:id/assignee", withUser(tt.userID, tt.orgID, tt.role), handler.AssignTicket)
+
+			req := httptest.NewRequest(http.MethodPatch, "/tickets/"+ticketID.String()+"/assignee", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			res := httptest.NewRecorder()
+
+			router.ServeHTTP(res, req)
+
+			if res.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d, body = %s", res.Code, tt.wantStatus, res.Body.String())
+			}
+			if ticketRepo.assignCalled != tt.wantAssignCalled {
+				t.Fatalf("assignCalled = %v, want %v", ticketRepo.assignCalled, tt.wantAssignCalled)
+			}
+			if tt.wantAssigneeID == nil {
+				if ticketRepo.assignedID != nil {
+					t.Fatalf("assignedID = %v, want nil", ticketRepo.assignedID)
+				}
+				return
+			}
+			if ticketRepo.assignedID == nil || *ticketRepo.assignedID != *tt.wantAssigneeID {
+				t.Fatalf("assignedID = %v, want %v", ticketRepo.assignedID, *tt.wantAssigneeID)
+			}
+		})
 	}
 }
 
@@ -385,3 +569,4 @@ func withUser(userID, orgID uuid.UUID, role models.Role) gin.HandlerFunc {
 }
 
 var _ repository.TicketRepository = (*fakeTicketRepo)(nil)
+var _ repository.UserRepository = (*fakeUserRepo)(nil)

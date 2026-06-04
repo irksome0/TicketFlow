@@ -70,6 +70,7 @@ func Setup(
 			tickets.POST("", ticketHandler.CreateTicket)
 			tickets.GET("/:id", ticketHandler.GetTicket)
 			tickets.PATCH("/:id/status", ticketHandler.UpdateTicketStatus)
+			tickets.PATCH("/:id/assignee", ticketHandler.AssignTicket)
 			tickets.GET("/:id/comments", ticketHandler.ListComments)
 			tickets.POST("/:id/comments", ticketHandler.CreateComment)
 
@@ -79,11 +80,20 @@ func Setup(
 		}
 
 		users := protected.Group("/users")
-		users.Use(middleware.RequireRole(models.RoleAdmin))
 		{
-			users.GET("", userHandler.GetAll)
-			users.POST("/invites", userHandler.CreateInvite)
-			users.PATCH("/:id/role", userHandler.UpdateRole)
+			users.GET(
+				"/engineers",
+				middleware.RequireRole(models.RoleOperator, models.RoleAdmin),
+				userHandler.GetEngineers,
+			)
+
+			adminUsers := users.Group("")
+			adminUsers.Use(middleware.RequireRole(models.RoleAdmin))
+			{
+				adminUsers.GET("", userHandler.GetAll)
+				adminUsers.POST("/invites", userHandler.CreateInvite)
+				adminUsers.PATCH("/:id/role", userHandler.UpdateRole)
+			}
 		}
 	}
 
