@@ -94,6 +94,17 @@ function formatDate(value: string): string {
   }).format(new Date(value));
 }
 
+function userDisplayName(user: User): string {
+  return `${user.first_name} ${user.last_name}`.trim() || user.email;
+}
+
+function assigneeLabel(ticket: Ticket): string {
+  if (ticket.assignee) {
+    return userDisplayName(ticket.assignee);
+  }
+  return ticket.assignee_id ? "Призначено" : "Не призначено";
+}
+
 export default function TicketsPage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
@@ -255,6 +266,7 @@ export default function TicketsPage() {
                   <th className="px-4 py-3 font-semibold">Назва</th>
                   <th className="px-4 py-3 font-semibold">Статус</th>
                   <th className="px-4 py-3 font-semibold">Пріоритет</th>
+                  <th className="px-4 py-3 font-semibold">Виконавець</th>
                   <th className="px-4 py-3 font-semibold">SLA</th>
                   <th className="px-4 py-3 font-semibold">Створено</th>
                 </tr>
@@ -262,13 +274,13 @@ export default function TicketsPage() {
               <tbody className="divide-y divide-border">
                 {isLoading ? (
                   <tr>
-                    <td className="px-4 py-6 text-muted" colSpan={5}>
+                    <td className="px-4 py-6 text-muted" colSpan={6}>
                       Завантаження...
                     </td>
                   </tr>
                 ) : tickets.length === 0 ? (
                   <tr>
-                    <td className="px-4 py-6 text-muted" colSpan={5}>
+                    <td className="px-4 py-6 text-muted" colSpan={6}>
                       Заявок не знайдено.
                     </td>
                   </tr>
@@ -296,6 +308,9 @@ export default function TicketsPage() {
                         >
                           {ticket.priority}
                         </span>
+                      </td>
+                      <td className="max-w-[220px] px-4 py-3 text-muted">
+                        <p className="truncate">{assigneeLabel(ticket)}</p>
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-muted">
                         <span

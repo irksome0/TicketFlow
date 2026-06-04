@@ -17,15 +17,21 @@ import (
 
 type TicketHandler struct {
 	ticketRepo repository.TicketRepository
+	userRepo   repository.UserRepository
 	slaEngine  *sla.Engine
 }
 
-func NewTicketHandler(ticketRepo repository.TicketRepository, slaEngine *sla.Engine) *TicketHandler {
+func NewTicketHandler(
+	ticketRepo repository.TicketRepository,
+	userRepo repository.UserRepository,
+	slaEngine *sla.Engine,
+) *TicketHandler {
 	if slaEngine == nil {
 		slaEngine = sla.MustDefaultEngine()
 	}
 	return &TicketHandler{
 		ticketRepo: ticketRepo,
+		userRepo:   userRepo,
 		slaEngine:  slaEngine,
 	}
 }
@@ -40,11 +46,16 @@ type updateStatusRequest struct {
 	Status models.TicketStatus `json:"status" binding:"required"`
 }
 
+type assignTicketRequest struct {
+	AssigneeID *uuid.UUID `json:"assignee_id"`
+}
+
 type ticketResponse struct {
 	ID                    uuid.UUID               `json:"id"`
 	OrganizationID        uuid.UUID               `json:"organization_id"`
 	CreatorID             uuid.UUID               `json:"creator_id"`
 	AssigneeID            *uuid.UUID              `json:"assignee_id"`
+	Assignee              *userResponse           `json:"assignee,omitempty"`
 	Title                 string                  `json:"title"`
 	Description           string                  `json:"description"`
 	Status                models.TicketStatus     `json:"status"`
@@ -158,6 +169,14 @@ func (h *TicketHandler) ListTickets(c *gin.Context) {
 			return
 		}
 		filter.Priority = &priority
+	}
+	if a := c.Query("assignee_id"); a != "" {
+		assigneeID, err := uuid.Parse(a)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "невалідний ідентифікатор виконавця"})
+			return
+		}
+		filter.AssigneeID = &assigneeID
 	}
 
 	if role == models.RoleClient {
@@ -375,6 +394,87 @@ func (h *TicketHandler) UpdateTicketStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, h.toTicketResponse(*updated))
 }
 
+func (h *TicketHandler) AssignTicket(c *gin.Context) {
+	var req assignTicketRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ticketID, ok := mustParseTicketID(c)
+	if !ok {
+		return
+	}
+	orgID, ok := mustGetOrgID(c)
+	if !ok {
+		return
+	}
+	role, ok := mustGetRole(c)
+	if !ok {
+		return
+	}
+
+	if role != models.RoleOperator && role != models.RoleAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"error": "тільки оператор або адміністратор може призначати виконавця"})
+		return
+	}
+
+	ticket, err := h.ticketRepo.FindByID(ticketID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "заявку не знайдено"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "помилка отримання заявки"})
+		return
+	}
+
+	if ticket.OrganizationID != orgID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "доступ заборонено"})
+		return
+	}
+
+	if req.AssigneeID != nil {
+		if h.userRepo == nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "репозиторій користувачів не налаштовано"})
+			return
+		}
+
+		assignee, err := h.userRepo.FindByID(*req.AssigneeID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "виконавця не знайдено"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "помилка отримання виконавця"})
+			return
+		}
+
+		if assignee.OrganizationID != orgID {
+			c.JSON(http.StatusNotFound, gin.H{"error": "виконавця не знайдено"})
+			return
+		}
+
+		if assignee.Role != models.RoleEngineer {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "виконавцем заявки може бути лише користувач з роллю Engineer"})
+			return
+		}
+	}
+
+	if err := h.ticketRepo.AssignTo(ticketID, req.AssigneeID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "помилка призначення виконавця"})
+		return
+	}
+
+	updated, err := h.ticketRepo.FindByID(ticketID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "помилка отримання оновленої заявки"})
+		return
+	}
+
+	c.JSON(http.StatusOK, h.toTicketResponse(*updated))
+}
+
 func (h *TicketHandler) ListComments(c *gin.Context) {
 	ticket, ok := h.authorizedTicket(c)
 	if !ok {
@@ -534,11 +634,18 @@ func (h *TicketHandler) toTicketResponse(t models.Ticket) ticketResponse {
 		}
 	}
 
+	var assignee *userResponse
+	if t.Assignee != nil {
+		response := toUserResponse(*t.Assignee)
+		assignee = &response
+	}
+
 	return ticketResponse{
 		ID:                    t.ID,
 		OrganizationID:        t.OrganizationID,
 		CreatorID:             t.CreatorID,
 		AssigneeID:            t.AssigneeID,
+		Assignee:              assignee,
 		Title:                 t.Title,
 		Description:           t.Description,
 		Status:                t.Status,

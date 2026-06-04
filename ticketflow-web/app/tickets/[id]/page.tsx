@@ -4,9 +4,11 @@ import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 import {
+  assignTicket,
   createTicketComment,
   downloadAttachment,
   getAttachments,
+  getEngineers,
   getTicket,
   getTicketComments,
   isApiError,
@@ -151,6 +153,14 @@ function canUseAttachments(user: User): boolean {
   return user.role !== "admin";
 }
 
+function canAssignTicket(user: User): boolean {
+  return user.role === "operator" || user.role === "admin";
+}
+
+function userDisplayName(user: User): string {
+  return `${user.first_name} ${user.last_name}`.trim() || user.email;
+}
+
 export default function TicketDetailsPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -158,9 +168,11 @@ export default function TicketDetailsPage() {
 
   const [user, setUser] = useState<User | null>(null);
   const [ticket, setTicket] = useState<Ticket | null>(null);
+  const [engineers, setEngineers] = useState<User[]>([]);
   const [comments, setComments] = useState<TicketComment[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [assigneeError, setAssigneeError] = useState<string | null>(null);
   const [commentError, setCommentError] = useState<string | null>(null);
   const [commentMessage, setCommentMessage] = useState("");
   const [fileError, setFileError] = useState<string | null>(null);
@@ -168,6 +180,7 @@ export default function TicketDetailsPage() {
   const [isLoadingComments, setIsLoadingComments] = useState(false);
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isAssigning, setIsAssigning] = useState(false);
   const [statusLoading, setStatusLoading] = useState<TicketStatus | null>(null);
 
   const availableStatuses = useMemo(() => {
@@ -179,6 +192,28 @@ export default function TicketDetailsPage() {
     const allowed = roleTargets[user.role] ?? [];
     return next.filter((status) => allowed.includes(status));
   }, [ticket, user]);
+
+  const currentAssigneeName = useMemo(() => {
+    if (!ticket?.assignee_id) {
+      return "Не призначено";
+    }
+    if (ticket.assignee) {
+      return userDisplayName(ticket.assignee);
+    }
+
+    const assignee = engineers.find((engineer) => engineer.id === ticket.assignee_id);
+    return assignee ? userDisplayName(assignee) : "Виконавця не знайдено";
+  }, [engineers, ticket]);
+
+  const assigneeOptions = useMemo(() => {
+    if (!ticket?.assignee_id || engineers.some((engineer) => engineer.id === ticket.assignee_id)) {
+      return engineers;
+    }
+    if (ticket.assignee) {
+      return [ticket.assignee, ...engineers];
+    }
+    return engineers;
+  }, [engineers, ticket]);
 
   const sla = ticket ? getSlaText(ticket) : null;
 
@@ -206,6 +241,17 @@ export default function TicketDetailsPage() {
         if (authenticatedUser.role !== "admin") {
           const loadedAttachments = await getAttachments(ticketId);
           setAttachments(loadedAttachments);
+        }
+
+        if (canAssignTicket(authenticatedUser)) {
+          try {
+            const loadedEngineers = await getEngineers();
+            setEngineers(loadedEngineers.data);
+          } catch (err) {
+            setAssigneeError(
+              err instanceof Error ? err.message : "Не вдалося отримати список інженерів.",
+            );
+          }
         }
       } catch (err) {
         if (
@@ -236,6 +282,21 @@ export default function TicketDetailsPage() {
       setError(err instanceof Error ? err.message : "Не вдалося змінити статус.");
     } finally {
       setStatusLoading(null);
+    }
+  }
+
+  async function handleAssigneeChange(assigneeId: string) {
+    setAssigneeError(null);
+    setIsAssigning(true);
+    try {
+      const updated = await assignTicket(ticketId, assigneeId || null);
+      setTicket(updated);
+    } catch (err) {
+      setAssigneeError(
+        err instanceof Error ? err.message : "Не вдалося призначити виконавця.",
+      );
+    } finally {
+      setIsAssigning(false);
     }
   }
 
@@ -418,6 +479,50 @@ export default function TicketDetailsPage() {
             </section>
 
             <aside className="space-y-5">
+              <section className="rounded-lg border border-border bg-white p-5 shadow-sm">
+                <h2 className="mb-3 text-base font-semibold text-text">Виконавець</h2>
+                <p className="mb-3 text-sm text-muted">
+                  Поточний виконавець:{" "}
+                  <span className="font-medium text-text">{currentAssigneeName}</span>
+                </p>
+
+                {canAssignTicket(user) ? (
+                  <div className="space-y-3">
+                    <select
+                      className="w-full rounded-md border border-border bg-white px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-not-allowed disabled:bg-surface disabled:text-muted"
+                      value={ticket.assignee_id ?? ""}
+                      onChange={(event) => handleAssigneeChange(event.target.value)}
+                      disabled={isAssigning || (assigneeOptions.length === 0 && !ticket.assignee_id)}
+                    >
+                      <option value="">Без виконавця</option>
+                      {assigneeOptions.map((engineer) => (
+                        <option key={engineer.id} value={engineer.id}>
+                          {userDisplayName(engineer)} ({engineer.email})
+                        </option>
+                      ))}
+                    </select>
+
+                    {isAssigning ? (
+                      <p className="text-sm text-muted">Оновлення виконавця...</p>
+                    ) : null}
+                    {assigneeOptions.length === 0 ? (
+                      <p className="text-sm text-muted">
+                        В організації немає користувачів з роллю Engineer.
+                      </p>
+                    ) : null}
+                    {assigneeError ? (
+                      <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-danger">
+                        {assigneeError}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted">
+                    Для поточної ролі призначення виконавця недоступне.
+                  </p>
+                )}
+              </section>
+
               <section className="rounded-lg border border-border bg-white p-5 shadow-sm">
                 <h2 className="mb-3 text-base font-semibold text-text">Коментарі</h2>
 
